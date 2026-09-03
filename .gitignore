@@ -1,0 +1,64 @@
+# ===================== Unity 工程（EresothRTS）=====================
+
+# Unity 自动生成的缓存/编译产物——体积大且每人本地重新生成
+EresothRTS/[Ll]ibrary/
+EresothRTS/[Tt]emp/
+EresothRTS/[Oo]bj/
+EresothRTS/[Bb]uild/
+EresothRTS/[Bb]uilds/
+EresothRTS/[Ll]ogs/
+EresothRTS/[Uu]ser[Ss]ettings/
+EresothRTS/[Mm]emoryCaptures/
+EresothRTS/[Rr]ecordings/
+
+# Visual Studio / Rider / VSCode 生成的IDE缓存与工程文件
+EresothRTS/.vs/
+EresothRTS/.idea/
+EresothRTS/.vscode/
+EresothRTS/*.csproj
+EresothRTS/*.sln
+EresothRTS/*.suo
+EresothRTS/*.user
+EresothRTS/*.userprefs
+EresothRTS/*.pidb
+EresothRTS/*.booproj
+EresothRTS/*.svd
+EresothRTS/*.pdb
+EresothRTS/*.mdb
+EresothRTS/*.opendb
+EresothRTS/*.VC.db
+
+# Unity 崩溃报告与打包产物
+EresothRTS/sysinfo.txt
+EresothRTS/*.apk
+EresothRTS/*.aab
+EresothRTS/*.unitypackage
+EresothRTS/*.app
+
+# 断点/升级残留
+EresothRTS/.consulo/
+EresothRTS/*.tmp
+EresothRTS/artifacts/
+EresothRTS/AssetStoreTools*
+
+# ===================== 大体积归档 =====================
+# 工程压缩包，GitHub 不适合存， releases 或网盘代替
+*.zip
+*.rar
+*.7z
+*.tar
+*.tar.gz
+
+# ===================== 本机工具配置 =====================
+.codely-cli/
+
+# ===================== 操作系统垃圾文件 =====================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
