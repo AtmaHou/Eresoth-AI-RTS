@@ -18,7 +18,8 @@ namespace Eresoth
 
         void Update()
         {
-            if (Game.I.over) return;
+            if (!Game.I.started || Game.I.over) return;
+            if (cam == null) cam = Camera.main;   // 世界在开局确认后才生成，相机随之出现
             selected.RemoveAll(u => u == null);
 
             if (Input.GetMouseButtonDown(0)) { downPos = Input.mousePosition; dragging = false; }

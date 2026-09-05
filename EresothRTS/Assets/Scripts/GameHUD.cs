@@ -5,7 +5,8 @@ using UnityEngine.SceneManagement;
 
 namespace Eresoth
 {
-    /// <summary>HUD：资源栏 / 生产面板 / 血条 / 胜负结算。全部 OnGUI 实现，零 UI 资源。</summary>
+    /// <summary>HUD：资源栏 / 生产与科技面板 / 血条 / 胜负结算。全部 OnGUI 实现，零 UI 资源。
+    /// 面板按 BuildingDef.train / BuildingDef.techs 数据驱动生成。</summary>
     public class GameHUD : MonoBehaviour
     {
         SelectionManager sel;
@@ -27,10 +28,14 @@ namespace Eresoth
             var g = Game.I;
             EnsureStyles();
 
-            // 顶部资源栏
+            // 开局设置面板：确认后才生成世界
+            if (!g.started) { DrawIntro(); return; }
+
+            // 顶部资源栏（含科技等级与本局种子）
             GUI.Box(new Rect(0, 0, Screen.width, 26), GUIContent.none);
-            GUI.Label(new Rect(12, 3, 400, 22),
-                $"木头 {g.wood[0]}    魔法矿 {g.mana[0]}    人口 {g.PopCount(0)}/{GameConfig.PopCap}", mid);
+            GUI.Label(new Rect(12, 3, 700, 22),
+                $"木头 {g.wood[0]}    魔法矿 {g.mana[0]}    人口 {g.PopCount(0)}/{GameConfig.PopCap}" +
+                $"    攻+{g.atkLevel[0] * 15}%  防+{g.defLevel[0] * 15}%    种子 {g.seed}", mid);
             GUI.Label(new Rect(Screen.width - 430, 3, 420, 22),
                 "左键框选 | 右键移动/攻击/采集 | WASD滚屏 | 滚轮缩放", mid);
 
@@ -50,6 +55,36 @@ namespace Eresoth
             if (g.over) DrawEnd();
         }
 
+        void DrawIntro()
+        {
+            var g = Game.I;
+
+            GUI.color = new Color(0, 0, 0, 0.78f);
+            GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), Texture2D.whiteTexture);
+            GUI.color = Color.white;
+
+            float w = 480, h = 280;
+            var r = new Rect((Screen.width - w) / 2f, (Screen.height - h) / 2f, w, h);
+            GUI.Box(r, GUIContent.none);
+            GUI.Label(new Rect(r.x, r.y + 16, r.width, 40), "厄瑞索斯 RTS", big);
+
+            // 地图随机：开 = 每局随机种子；关 = 固定种子（布局可复现，便于调试）
+            Btn(new Rect(r.x + 50, r.y + 80, 170, 32),
+                $"地图随机：{(MapSettings.randomMap ? "开" : "关")}",
+                () => MapSettings.randomMap = !MapSettings.randomMap, true);
+            GUI.Label(new Rect(r.x + 235, r.y + 84, 220, 24),
+                MapSettings.randomMap ? "每局不同布局" : "固定种子可复现", mid);
+
+            // 资源丰富度：影响树木与魔法矿数量
+            Btn(new Rect(r.x + 50, r.y + 126, 170, 32),
+                $"资源：{MapSettings.RichnessNames[MapSettings.richnessIndex]}",
+                () => MapSettings.richnessIndex = (MapSettings.richnessIndex + 1) % 3, true);
+            GUI.Label(new Rect(r.x + 235, r.y + 130, 220, 24),
+                $"树木/矿点 ×{MapSettings.Richness}", mid);
+
+            Btn(new Rect(r.x + 140, r.y + 200, 200, 42), "开 始 游 戏", () => g.StartGame(), true);
+        }
+
         void DrawBottom()
         {
             float y = Screen.height - 106;
@@ -58,30 +93,72 @@ namespace Eresoth
             if (sel.selBuilding != null)
             {
                 var b = sel.selBuilding;
-                GUI.Label(new Rect(16, y, 500, 24), $"{b.DisplayName}  HP {b.hp:0}/{b.maxHp:0}", mid);
+                GUI.Label(new Rect(16, y, 500, 24), $"{b.DisplayName}  HP {b.hp:0}/{b.def.hp:0}", mid);
 
                 if (b.kind == "hall")
                 {
+                    // 训练工人 + 建造列表（按种族建筑表，已建置灰）
                     var workerDef = b.team == Team.Player ? GameConfig.Farmer : GameConfig.Acolyte;
-                    Btn(new Rect(16, y + 30, 160, 30), $"训练{workerDef.name} (50木)",
-                        () => b.TryTrain(workerDef), g.wood[0] >= 50);
-                    bool hasBar = g.Barracks(Team.Player) != null;
-                    Btn(new Rect(16, y + 66, 160, 30), hasBar ? "兵营已建成" : $"建造兵营 ({GameConfig.BarracksWood}木)",
-                        () => g.BuildBarracksPlayer(), !hasBar && g.wood[0] >= GameConfig.BarracksWood);
+                    Btn(new Rect(16, y + 30, 160, 30), $"训练{workerDef.name} ({workerDef.wood}木)",
+                        () => b.TryTrain(workerDef), g.wood[0] >= workerDef.wood);
+
+                    var list = b.team == Team.Player ? GameConfig.HumanBuildings : GameConfig.UndeadBuildings;
+                    for (int i = 0; i < list.Length; i++)
+                    {
+                        var bd = list[i];
+                        bool built = g.BuildingOfKind(b.team, bd.kind) != null;
+                        string cost = bd.mana > 0 ? $"{bd.wood}木+{bd.mana}矿" : $"{bd.wood}木";
+                        bool afford = g.wood[0] >= bd.wood && g.mana[0] >= bd.mana;
+                        var def = bd;
+                        Btn(new Rect(190 + i * 180, y + 30, 170, 30),
+                            built ? $"{bd.name}已建成" : $"建造{bd.name}({cost})",
+                            () => g.BuildStructure(b.team, def), !built && afford);
+                    }
                 }
                 else
                 {
-                    var defs = b.team == Team.Player ? GameConfig.HumanTrain : GameConfig.UndeadTrain;
+                    // 训练按钮（BuildingDef.train）
+                    var defs = b.def.train ?? System.Array.Empty<UnitDef>();
                     for (int i = 0; i < defs.Length; i++)
                     {
                         var d = defs[i];
                         string cost = d.mana > 0 ? $"{d.wood}木+{d.mana}矿" : $"{d.wood}木";
+                        var unitDef = d;
                         Btn(new Rect(16 + i * 180, y + 30, 170, 30), $"{d.name} ({cost})",
-                            () => b.TryTrain(d), g.wood[0] >= d.wood && g.mana[0] >= d.mana);
+                            () => b.TryTrain(unitDef), g.wood[0] >= d.wood && g.mana[0] >= d.mana);
+                    }
+
+                    // 研究按钮（BuildingDef.techs）：研究中显示进度，满级置灰
+                    var techs = b.def.techs;
+                    if (techs != null)
+                    {
+                        for (int i = 0; i < techs.Length; i++)
+                        {
+                            var td = GameConfig.Techs[techs[i]];
+                            int lvl = g.TechLevel(b.team, td.effect);
+                            var r = new Rect(16 + i * 180, y + 66, 170, 30);
+                            if (b.research == td.id)
+                            {
+                                GUI.Label(r, $"研究中… {td.name} {(int)(b.researchTimer / td.time * 100)}%", mid);
+                            }
+                            else if (lvl >= td.maxLevel)
+                            {
+                                GUI.Label(r, $"{td.name} 已满级", mid);
+                            }
+                            else
+                            {
+                                int mult = lvl + 1;
+                                string cost = td.mana > 0 ? $"{td.wood * mult}木+{td.mana * mult}矿" : $"{td.wood * mult}木";
+                                var techDef = td;
+                                Btn(r, $"研究{td.name}Lv{lvl + 1}({cost})", () => b.TryResearch(techDef.id),
+                                    g.wood[0] >= td.wood * mult && g.mana[0] >= td.mana * mult);
+                            }
+                        }
                     }
                 }
+
                 if (b.queue.Count > 0)
-                    GUI.Label(new Rect(200, y + 66, 600, 24),
+                    GUI.Label(new Rect(600, y + 66, 600, 24),
                         "队列：" + string.Join("、", b.queue.ConvertAll(q => q.name)), mid);
             }
             else if (sel.selected.Count > 0)
@@ -98,7 +175,7 @@ namespace Eresoth
             else
             {
                 GUI.Label(new Rect(16, y, 900, 24),
-                    "目标：摧毁右上角不死族主基地！点主基地训练农夫、造兵营，框选部队右键进攻。", mid);
+                    "目标：摧毁右上角不死族主基地！主基地训练农夫，兵营/弓箭场/马厩各出一种兵：步兵克骑兵、远程克步兵、骑兵快克远程（伤害+50%）。", mid);
             }
         }
 
