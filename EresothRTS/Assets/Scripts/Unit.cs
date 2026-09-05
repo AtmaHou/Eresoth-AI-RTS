@@ -2,239 +2,190 @@ using UnityEngine;
 
 namespace Eresoth
 {
-    /// <summary>单位：移动（转向+局部避让）、战斗（自动索敌/显式攻击，循环克制加成）。
-    /// 对外只暴露 CommandMove / CommandAttack 两条指令入口 ——
-    /// 这正是后续 LLM 军令层的挂载点：LLM 不碰单位，只发指令。</summary>
+    /// <summary>单位：移动 / 战斗 / 采集（采集由 WorkerAI 接管）。攻击用当前目标写 lastAttacker 供"刷怪盘"评分。
+    /// 视觉由 Models 程序化拼装，自带行走摆动/攻击前摇动画。</summary>
     public class Unit : MonoBehaviour, ITargetable
     {
         public Team team;
         public UnitDef def;
         public float hp;
+        public ITargetable target;          // 当前敌人（单位或建筑）
+        public Vector3 movePos;             // 玩家右键目的地
+        public Unit lastAttacker;           // 最近攻击者（AI 军令层用）
+        public bool busy;                   // 采集中（由 WorkerAI 维护）
+        public int holdSlot = -1;           // 驻守法阵索引（-1 = 非驻守）
+        public Transform ring;              // 选中高光圈
 
-        [HideInInspector] public GameObject ring;
-        [HideInInspector] public ITargetable target;
-        [HideInInspector] public Vector3 moveDest;
-        [HideInInspector] public bool hasMoveDest;
-        [HideInInspector] public ITargetable lastAttacker;  // 自动反击：最近一次攻击者
-        Transform visual;          // 身体图元挂点（攻击动作位移用）
-        float attackAnimT;         // 攻击动作剩余时间
-        float cd;
-
-        const float AttackAnimDur = 0.25f;   // 攻击动作（前冲刺）时长
-
-        // ---------- 生成 ----------
+        float cd;                           // 攻击冷却
+        public float stunT;                 // 瘫痪剩余时间（督军锁链）
+        float walkPhase;                    // 行走动画相位
+        float atkAnim;                      // 攻击动画进度（0..1）
+        Transform visual;                   // 视觉子物体（摆动动画只作用于此层，不影响逻辑朝向）
+        BodyRig rig;                        // 动画挂点
 
         public static Unit Spawn(Team team, UnitDef def, Vector3 pos)
         {
-            var root = new GameObject(def.name);
-            root.transform.position = pos;
+            var go = new GameObject(def.name);
+            go.transform.position = pos;
 
-            var visual = new GameObject("Visual").transform;
-            visual.SetParent(root.transform, false);
+            // 视觉子物体：程序化模型（骑兵带马），挂在独立子节点上做动画
+            var visualGo = new GameObject("visual");
+            visualGo.transform.SetParent(go.transform, false);
+            var u0 = go.AddComponent<Unit>();
+            u0.visual = visualGo.transform;
+            if (def.prefab != null)
+            {
+                var inst = Instantiate(def.prefab, visualGo.transform, false);
+                inst.transform.localPosition = Vector3.zero;
+                inst.transform.localRotation = Quaternion.identity;
+                // 尝试从 prefab 里找可能的动画器/渲染器；无则留空
+            }
+            else
+            {
+                u0.rig = Models.BuildUnit(visualGo.transform, team, def);
+            }
 
-            // 身体：按兵种大类组合不同图元（工人维持简单胶囊），英雄额外王冠/武器/光环圈
-            BuildBody(visual, def);
+            var col = go.AddComponent<CapsuleCollider>();
+            col.center = new Vector3(0, def.size, 0); col.radius = def.size * .5f; col.height = def.size * 2;
 
-            // 阵营标记（头顶小块：蓝=0 号位 红=1 号位）
-            float markerY = def.kind == UnitKind.Cavalry ? def.size * 2.5f : def.size * 2.15f;
-            Gfx.Prim(PrimitiveType.Cube, visual, new Vector3(0, markerY, 0),
-                     Vector3.one * def.size * 0.45f,
-                     team == Team.Player ? new Color(.3f, .6f, 1f) : new Color(.85f, .25f, .4f));
+            u0.team = team; u0.def = def; u0.hp = def.hp;
+            u0.movePos = pos;
 
-            var cap = root.AddComponent<CapsuleCollider>();
-            cap.center = new Vector3(0, def.size, 0);
-            cap.radius = def.size * 0.5f;
-            cap.height = def.size * 2f;
+            // 选中高光圈
+            u0.ring = MakeRing(u0.transform, def.size, team == Game.I.playerTeam ?
+                new Color(.35f, .95f, .35f) : new Color(.95f, .35f, .35f));
 
-            var u = root.AddComponent<Unit>();
-            u.team = team; u.def = def; u.hp = def.hp;
-            u.visual = visual;
-            if (def.worker) root.AddComponent<Worker>();
-
-            // 选中环（贴地）
-            var ring = Gfx.Prim(PrimitiveType.Cylinder, root.transform, new Vector3(0, 0.05f, 0),
-                     new Vector3(def.size * 1.8f, 0.02f, def.size * 1.8f),
-                     team == Team.Player ? new Color(.2f, 1f, .4f) : new Color(1f, .3f, .3f));
-            ring.SetActive(false);
-            u.ring = ring;
-
-            // 英雄光环圈（贴地，示出光环半径）
-            if (def.hero)
-                Gfx.Prim(PrimitiveType.Cylinder, root.transform, new Vector3(0, 0.04f, 0),
-                         new Vector3(def.auraRadius * 2f, 0.02f, def.auraRadius * 2f),
-                         new Color(1f, .88f, .4f));
-
-            Game.I.units.Add(u);
-            return u;
+            Game.I.units.Add(u0);
+            if (def.worker) go.AddComponent<Worker>();   // 采集状态机（EnemyAI / 右键采集共用）
+            return u0;
         }
 
-        /// <summary>单位造型：步兵=盾+头盔，远程=长弓+箭袋，骑兵=横置马身+四腿+骑手，工人=帽子；英雄加王冠和武器。</summary>
-        static void BuildBody(Transform v, UnitDef def)
+        static Transform MakeRing(Transform parent, float size, Color c)
         {
-            float s = def.size;
-            Color dark = def.color * 0.7f;
-            switch (def.kind)
+            var go = new GameObject("ring");
+            go.transform.SetParent(parent, false);
+            go.transform.localPosition = new Vector3(0, .04f, 0);
+            go.transform.localScale = Vector3.one * size * 1.4f;
+            const int n = 24;
+            var verts = new Vector3[n * 2 + 2];
+            var tris = new int[n * 6];
+            for (int i = 0; i <= n; i++)
             {
-                case UnitKind.Infantry:
-                    Gfx.Prim(PrimitiveType.Capsule, v, new Vector3(0, s, 0), Vector3.one * s, def.color);
-                    Gfx.Prim(PrimitiveType.Sphere, v, new Vector3(0, s * 1.9f, 0), Vector3.one * s * 0.42f, dark);   // 头盔
-                    Gfx.Prim(PrimitiveType.Cube, v, new Vector3(0, s, s * 0.45f), Vector3.one * s * 0.5f, dark);   // 盾
-                    break;
-                case UnitKind.Ranged:
-                    Gfx.Prim(PrimitiveType.Capsule, v, new Vector3(0, s, 0),
-                             new Vector3(s * 0.8f, s, s * 0.8f), def.color);
-                    var bow = Gfx.Prim(PrimitiveType.Cube, v, new Vector3(s * 0.45f, s, 0),
-                             new Vector3(s * 0.12f, s * 1.4f, s * 0.12f), dark);
-                    bow.transform.localRotation = Quaternion.Euler(0, 0, -35f);                                     // 长弓
-                    Gfx.Prim(PrimitiveType.Cube, v, new Vector3(0, s, -s * 0.45f),
-                             new Vector3(s * 0.3f, s * 0.7f, s * 0.25f), dark);                                   // 箭袋
-                    break;
-                case UnitKind.Cavalry:
-                    var horse = Gfx.Prim(PrimitiveType.Capsule, v, new Vector3(0, s * 0.8f, 0),
-                             new Vector3(s * 1.35f, s * 0.7f, s * 0.7f), dark);
-                    horse.transform.localRotation = Quaternion.Euler(0, 0, 90f);                                    // 马身（横置）
-                    for (int lx = -1; lx <= 1; lx += 2)
-                        for (int lz = -1; lz <= 1; lz += 2)
-                            Gfx.Prim(PrimitiveType.Cube, v, new Vector3(lx * s * 0.42f, s * 0.22f, lz * s * 0.5f),
-                                     Vector3.one * s * 0.2f, dark);                                              // 四条腿
-                    Gfx.Prim(PrimitiveType.Capsule, v, new Vector3(0, s * 1.55f, 0), Vector3.one * s * 0.55f, def.color); // 骑手
-                    break;
-                default:   // Worker
-                    Gfx.Prim(PrimitiveType.Capsule, v, new Vector3(0, s, 0), Vector3.one * s, def.color);
-                    Gfx.Prim(PrimitiveType.Cube, v, new Vector3(0, s * 1.85f, 0),
-                             new Vector3(s * 0.5f, s * 0.2f, s * 0.5f), dark);                                   // 帽子
-                    break;
+                float a = i * Mathf.PI * 2 / n;
+                verts[i * 2] = new Vector3(Mathf.Cos(a) * .5f, 0, Mathf.Sin(a) * .5f);
+                verts[i * 2 + 1] = new Vector3(Mathf.Cos(a) * .42f, 0, Mathf.Sin(a) * .42f);
+                if (i < n)
+                {
+                    int b = i * 2;
+                    tris[i * 6] = b; tris[i * 6 + 1] = b + 2; tris[i * 6 + 2] = b + 1;
+                    tris[i * 6 + 3] = b + 1; tris[i * 6 + 4] = b + 2; tris[i * 6 + 5] = b + 3;
+                }
             }
-
-            if (def.hero)
-            {
-                Gfx.Prim(PrimitiveType.Cube, v, new Vector3(0, markerHeight(def), 0),
-                         new Vector3(s * 0.5f, s * 0.18f, s * 0.5f), new Color(1f, .85f, .3f));                  // 王冠
-                var blade = Gfx.Prim(PrimitiveType.Cube, v, new Vector3(s * 0.62f, s, 0),
-                         new Vector3(s * 0.1f, s * 1.5f, s * 0.1f), new Color(.92f, .92f, .95f));                // 武器
-                blade.transform.localRotation = Quaternion.Euler(0, 0, -20f);
-            }
+            var mesh = new Mesh { name = "ring", vertices = verts, triangles = tris };
+            mesh.RecalculateNormals();
+            var mf = go.AddComponent<MeshFilter>(); mf.sharedMesh = mesh;
+            var mr = go.AddComponent<MeshRenderer>();
+            mr.sharedMaterial = Gfx.Mat(c, 0f, .45f, true);
+            go.SetActive(false);
+            return go.transform;
         }
 
-        static float markerHeight(UnitDef def)
-            => def.kind == UnitKind.Cavalry ? def.size * 2.3f : def.size * 2.15f;
+        /// <summary>外部控制：移动到目标点，停止半径内视为到达。</summary>
+        public bool MoveStep(Vector3 dest, float dt, float stopRadius)
+        {
+            float dist = Vector3.Distance(transform.position, dest) - stopRadius;
+            if (dist <= .2f) return true;
+            Move(dest, dt);
+            return false;
+        }
 
-        void OnDestroy() { if (Game.I != null) Game.I.units.Remove(this); }
-
-        // ---------- 指令入口（未来由 LLM 军令层调用同一接口） ----------
-
+        /// <summary>玩家/AI 下达移动命令。</summary>
         public void CommandMove(Vector3 p)
         {
-            target = null; moveDest = p; hasMoveDest = true;
+            target = null;
+            movePos = p;
             var w = GetComponent<Worker>(); if (w != null) w.StopGather();
+            busy = false;
         }
 
+        /// <summary>玩家/AI 下达攻击命令。</summary>
         public void CommandAttack(ITargetable t)
         {
-            target = t; hasMoveDest = false;
+            target = t;
+            movePos = t.Pos;
             var w = GetComponent<Worker>(); if (w != null) w.StopGather();
+            busy = false;
         }
 
-        // ---------- 主循环 ----------
+        void OnDestroy() { if (Game.I != null) Game.I.units.Remove(this); }
 
         void Update()
         {
             if (Game.I.over) return;
             float dt = Time.deltaTime;
-            cd -= dt;
+            if (stunT > 0) { stunT -= dt; Anim(0, dt); return; } // 瘫痪：静止
+            if (busy) { Anim(0, dt); return; }   // 采集循环由 WorkerAI 驱动
 
-            // 攻击动作：身体向前冲刺一小段
-            if (visual != null)
+            // --- 目标决策：缓存目标失效则重寻最近敌（警戒范围） ---
+            if (target == null || !target.Alive)
             {
-                if (attackAnimT > 0)
+                target = null;
+                float best = def.aggro;
+                foreach (var u in Game.I.units)
                 {
-                    attackAnimT -= dt;
-                    float k = Mathf.Sin((1f - attackAnimT / AttackAnimDur) * Mathf.PI);
-                    visual.localPosition = Vector3.forward * (k * def.size * 0.45f);
-                    if (attackAnimT <= 0) visual.localPosition = Vector3.zero;
+                    if (u.team == team) continue;
+                    float d = Vector3.Distance(transform.position, u.transform.position);
+                    if (d < best) { best = d; target = u; }
                 }
-                else if (visual.localPosition != Vector3.zero)
-                    visual.localPosition = Vector3.zero;
-            }
-
-            if (target != null && !target.Alive) target = null;
-
-            // 自动反击/追击：谁打我我打谁——放下手头移动，锁定攻击者
-            if (target == null && !def.worker && lastAttacker != null)
-            {
-                if (lastAttacker.Alive) { target = lastAttacker; hasMoveDest = false; }
-                else lastAttacker = null;
-            }
-
-            // 非采集单位无目标时自动索敌
-            ITargetable tgt = target;
-            if (tgt == null && !def.worker && !hasMoveDest) tgt = Acquire();
-
-            if (tgt != null)
-            {
-                float dist = Vector3.Distance(transform.position, tgt.Pos) - tgt.Radius;
-                if (dist > def.range) MoveStep(tgt.Pos, dt, tgt.Radius * 0.5f);
-                else FaceAndHit(tgt, dt);
-            }
-            else if (hasMoveDest)
-            {
-                if (MoveStep(moveDest, dt, 0)) hasMoveDest = false;
-            }
-        }
-
-        ITargetable Acquire()
-        {
-            ITargetable best = null; float bd = def.aggro;
-            foreach (var u in Game.I.units)
-            {
-                if (u.team == team) continue;
-                float d = Vector3.Distance(transform.position, u.transform.position);
-                if (d < bd) { bd = d; best = u; }
-            }
-            if (best == null)
-                foreach (var b in Game.I.buildings)
+                if (target == null)
                 {
-                    if (b.team == team) continue;
-                    float d = Vector3.Distance(transform.position, b.transform.position) - b.radius;
-                    if (d < bd) { bd = d; best = b; }
-                }
-            return best;
-        }
-
-        void FaceAndHit(ITargetable tgt, float dt)
-        {
-            var dir = tgt.Pos - transform.position; dir.y = 0;
-            if (dir.sqrMagnitude > 0.01f)
-                transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dir), 12f * dt);
-            if (cd <= 0)
-            {
-                cd = def.cooldown;
-                attackAnimT = AttackAnimDur;
-                float dmg = def.dmg * CounterMult(tgt) * Game.I.AtkMult((int)team)
-                                  * Game.I.AuraDmgMult(team, transform.position);
-                if (def.range >= 3f)
-                {
-                    Game.I.SpawnProjectile(team, transform.position + Vector3.up * def.size * 1.4f, tgt, dmg, def.aoeRadius, this);
-                }
-                else
-                {
-                    tgt.Damage(dmg);
-                    if (tgt is Unit tu) tu.lastAttacker = this;
-                    if (def.aoeRadius > 0f) Splash(tgt.Pos, dmg);   // 英雄近战 AOE
+                    foreach (var b in Game.I.buildings)
+                    {
+                        if (b.team == team) continue;
+                        float d = Vector3.Distance(transform.position, b.transform.position) - b.radius;
+                        if (d < best) { best = d; target = b; }
+                    }
                 }
             }
-        }
 
-        /// <summary>英雄 AOE：主目标周围敌方单位受到溅射伤害（SplashFrac）。</summary>
-        void Splash(Vector3 center, float dmg)
-        {
-            foreach (var u in Game.I.units)
+            bool moving = false;
+            if (target != null)
             {
-                if (u.team == team || !u.Alive) continue;
-                if (Vector3.Distance(u.transform.position, center) > def.aoeRadius) continue;
-                u.Damage(dmg * GameConfig.SplashFrac);
-                u.lastAttacker = this;
+                float dist = Vector3.Distance(transform.position, target.Pos) - target.Radius;
+                if (dist <= def.range)
+                {
+                    // 攻击：冷却到即出手；远程走 Game.SpawnProjectile 统一弹道
+                    Face(target.Pos);
+                    cd -= dt;
+                    if (cd <= 0)
+                    {
+                        cd = def.cooldown;
+                        atkAnim = 1f;
+                        bool ranged = def.range > 3f;
+                        float dmg = def.dmg * CounterMult(target) * Game.I.AtkMult((int)team) * Game.I.AuraDmgMult(team, transform.position);
+                        if (ranged)
+                            Game.I.SpawnProjectile(team, transform.position + Vector3.up * def.size * 1.5f,
+                                                   target, dmg, def.aoeRadius, this);
+                        else
+                        {
+                            target.Damage(dmg);
+                            if (target is Unit tu) tu.lastAttacker = this;
+                            if (def.aoeRadius > 0f)
+                                foreach (var u in Game.I.units)
+                                {
+                                    if (u.team == team || !u.Alive || u == target as Unit) continue;
+                                    if (Vector3.Distance(u.transform.position, target.Pos) > def.aoeRadius) continue;
+                                    u.Damage(def.dmg * GameConfig.SplashFrac);
+                                    u.lastAttacker = this;
+                                }
+                        }
+                    }
+                }
+                else { Move(target.Pos, dt); moving = true; }
             }
+            else if (Vector3.Distance(transform.position, movePos) > .5f) { Move(movePos, dt); moving = true; }
+
+            Anim(moving ? 1f : 0f, dt);
         }
 
         /// <summary>循环克制：步兵克骑兵、远程克步兵、骑兵克远程，伤害 ×CounterBonus；对建筑/工人无加成。</summary>
@@ -248,40 +199,69 @@ namespace Eresoth
             return counter ? GameConfig.CounterBonus : 1f;
         }
 
-        // ---------- 移动（转向 + 局部避让，供战斗/采集/指令共用） ----------
-
-        public bool MoveStep(Vector3 dest, float dt, float extraRadius)
+        void Move(Vector3 dest, float dt)
         {
             Vector3 to = dest - transform.position; to.y = 0;
-            if (to.magnitude <= 0.7f + extraRadius) return true;
-            Vector3 dir = to.normalized + Separation();
-            dir.y = 0;
-            if (dir.sqrMagnitude < 0.001f) dir = to.normalized;
-            dir.Normalize();
-            transform.position += dir * def.speed * dt;
-            transform.rotation = Quaternion.Slerp(transform.rotation, Quaternion.LookRotation(dir), 12f * dt);
-            return false;
+            if (to.magnitude < .1f) return;
+            Face(dest);
+            transform.position += to.normalized * (def.speed * dt);
+            // 贴合起伏地形
+            var p = transform.position;
+            p.y = Game.TerrainHeight(p.x, p.z);
+            transform.position = p;
         }
 
-        Vector3 Separation()
+        void Face(Vector3 dest)
         {
-            Vector3 push = Vector3.zero;
-            var list = Game.I.units;
-            for (int i = 0; i < list.Count; i++)
+            Vector3 d = dest - transform.position; d.y = 0;
+            if (d.sqrMagnitude > .01f) transform.rotation = Quaternion.LookRotation(d);
+        }
+
+        /// <summary>行走/攻击动画：腿部与手臂绕挂点正弦摆动，攻击时右臂前挥。</summary>
+        void Anim(float moveBlend, float dt)
+        {
+            if (rig == null) return;
+            if (moveBlend > 0)
+                walkPhase += dt * def.speed * 1.6f;
+            else
+                walkPhase = Mathf.Lerp(walkPhase, Mathf.Round(walkPhase / Mathf.PI) * Mathf.PI, dt * 8);
+
+            float sw = Mathf.Sin(walkPhase) * 28f * moveBlend;
+
+            if (rig.legL != null) rig.legL.localRotation = Quaternion.Euler(sw, 0, 0);
+            if (rig.legR != null) rig.legR.localRotation = Quaternion.Euler(-sw, 0, 0);
+            if (rig.armL != null) rig.armL.localRotation = Quaternion.Euler(-sw * .6f, 0, 0);
+            if (rig.armR != null && atkAnim <= 0) rig.armR.localRotation = Quaternion.Euler(sw * .6f, 0, 0);
+
+            // 马腿对角逐摆
+            if (rig.horseLegs != null)
+                for (int i = 0; i < rig.horseLegs.Length; i++)
+                {
+                    float ph = walkPhase + (i == 0 || i == 3 ? 0 : Mathf.PI);
+                    rig.horseLegs[i].localRotation = Quaternion.Euler(Mathf.Sin(ph) * 22f * moveBlend, 0, 0);
+                }
+
+            // 行走时身体轻微起伏
+            if (rig.torso != null && rig.horseLegs == null)
             {
-                var o = list[i]; if (o == this) continue;
-                Vector3 d = transform.position - o.transform.position; d.y = 0;
-                float min = (def.size + o.def.size) * 0.45f;
-                float dist = d.magnitude;
-                if (dist > 0.0001f && dist < min) push += d.normalized * (min - dist) * 2f;
+                var p = rig.torso.localPosition;
+                p.y = (rig.legL != null ? def.size * .75f : p.y) + Mathf.Abs(Mathf.Sin(walkPhase)) * .05f * moveBlend;
+                rig.torso.localPosition = p;
             }
-            return push;
+
+            // 攻击动画：右臂快速前挥后复位
+            if (atkAnim > 0)
+            {
+                atkAnim = Mathf.Max(0, atkAnim - dt * 5);
+                float k = Mathf.Sin(atkAnim * Mathf.PI);
+                if (rig.armR != null) rig.armR.localRotation = Quaternion.Euler(-90 * k, 0, 0);
+            }
         }
 
         // ---------- ITargetable ----------
 
         public Vector3 Pos => transform.position;
-        public float Radius => def.size * 0.6f;
+        public float Radius => def.size * .5f;
         public Team Team => team;
         public bool Alive => hp > 0;
         public float Hp01 => hp / def.hp;
@@ -290,11 +270,7 @@ namespace Eresoth
         public void Damage(float dmg)
         {
             hp -= dmg * Game.I.DefMult((int)team);
-            if (hp <= 0)
-            {
-                hp = 0;
-                Destroy(gameObject);
-            }
+            if (hp <= 0) { hp = 0; Destroy(gameObject); }
         }
     }
 }

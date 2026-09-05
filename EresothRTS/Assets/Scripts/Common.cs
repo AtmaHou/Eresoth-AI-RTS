@@ -22,7 +22,8 @@ namespace Eresoth
         void Damage(float dmg);
     }
 
-    /// <summary>兵种静态数据：循环克制体系（步兵/远程/骑兵）+ 工人 + 英雄（光环/AOE）。</summary>
+    /// <summary>兵种静态数据：循环克制体系（步兵/远程/骑兵）+ 工人 + 英雄（光环/AOE）。
+    /// 可指定 prefab：非空时实例化外部模型，空时回退到程序化低多边形模型。</summary>
     public class UnitDef
     {
         public string id, name;
@@ -34,10 +35,12 @@ namespace Eresoth
         public float auraRadius, auraBonus;     // 光环：附近友军伤害 +bonus
         public float aoeRadius;                 // AOE：攻击对目标周围溅射（SplashFrac 伤害）
         public Color color;
+        public GameObject prefab;               // 可选外部模型/动画 Prefab
 
         public UnitDef(string id, string name, UnitKind kind, float hp, float dmg, float range, float speed,
             float cooldown, float aggro, float size, int wood, int mana, int pop, bool worker, Color color,
-            bool hero = false, float auraRadius = 0f, float auraBonus = 0f, float aoeRadius = 0f)
+            bool hero = false, float auraRadius = 0f, float auraBonus = 0f, float aoeRadius = 0f,
+            GameObject prefab = null)
         {
             this.id = id; this.name = name; this.kind = kind;
             this.hp = hp; this.dmg = dmg; this.range = range;
@@ -45,12 +48,13 @@ namespace Eresoth
             this.wood = wood; this.mana = mana; this.pop = pop; this.worker = worker;
             this.color = color;
             this.hero = hero; this.auraRadius = auraRadius; this.auraBonus = auraBonus;
-            this.aoeRadius = aoeRadius;
+            this.aoeRadius = aoeRadius; this.prefab = prefab;
         }
     }
 
     /// <summary>建筑静态数据：造价/HP/可训练兵种/可研究科技，全部数据驱动。
-    /// atkRange > 0 时为防御塔（自动攻击射程内敌人）。</summary>
+    /// atkRange > 0 时为防御塔（自动攻击射程内敌人）。
+    /// 可指定 prefab：非空时实例化外部模型，空时回退到程序化低多边形模型。</summary>
     public class BuildingDef
     {
         public string kind, name;
@@ -59,14 +63,17 @@ namespace Eresoth
         public UnitDef[] train;
         public string[] techs;
         public float atk, atkRange, atkCd;   // 防御塔攻击参数（atkRange=0 表示无攻击力）
+        public GameObject prefab;            // 可选外部模型 Prefab
 
         public BuildingDef(string kind, string name, int wood, int mana, float hp, float size,
             UnitDef[] train = null, string[] techs = null,
-            float atk = 0f, float atkRange = 0f, float atkCd = 0f)
+            float atk = 0f, float atkRange = 0f, float atkCd = 0f,
+            GameObject prefab = null)
         {
             this.kind = kind; this.name = name; this.wood = wood; this.mana = mana;
             this.hp = hp; this.size = size; this.train = train; this.techs = techs;
             this.atk = atk; this.atkRange = atkRange; this.atkCd = atkCd;
+            this.prefab = prefab;
         }
     }
 
@@ -101,7 +108,9 @@ namespace Eresoth
 
     public static class GameConfig
     {
-        public const int PopCap = 30;
+        public const int BasePop = 40;      // 主基地自带人口
+        public const int HousePop = 15;     // 每座民居 +15 人口
+        public const int MaxPopCap = 100;   // 人口硬上限
         public const int GatherAmount = 8;      // 单次采集量
         public const float GatherTime = 2f;     // 单次采集耗时(秒)
         public const float TrainTime = 2.5f;    // 单位训练耗时(秒)
@@ -141,17 +150,19 @@ namespace Eresoth
 
         // ---- 建筑表：主基地 + 每类兵种一座专属兵营（科技在步兵兵营研究）----
         // 伐木场：工人采集量 +50%（全场唯一）；箭塔：自动攻击的防御塔（可建多座）
+        // 民居：人口 +15（可建多座，主基地 40 + 4 民居正好到 100 上限）
         public static readonly BuildingDef Hall        = new("hall",        "主基地",   0,   0,   1500, 5.0f);
         public static readonly BuildingDef Barracks    = new("barracks",    "兵营",     150, 0,   800,  3.6f, new[] { Footman, LordKnight }, new[] { "human_atk", "human_def" });
         public static readonly BuildingDef Archery     = new("archery",     "弓箭场",   140, 20,  700,  3.2f, new[] { Archer });
         public static readonly BuildingDef Stable      = new("stable",      "马厩",     180, 40,  800,  3.6f, new[] { Knight });
         public static readonly BuildingDef Lumber      = new("lumber",      "伐木场",   120, 0,   600,  3.0f);
         public static readonly BuildingDef Tower       = new("tower",       "箭塔",     80,  0,   350,  2.6f, atk: 12, atkRange: 11, atkCd: 1f);
+        public static readonly BuildingDef House       = new("house",       "民居",     80,  0,   400,  3.0f);
         public static readonly BuildingDef Crypt       = new("crypt",       "地穴",     150, 0,   800,  3.6f, new[] { Skeleton, DeathRanger }, new[] { "undead_atk", "undead_def" });
         public static readonly BuildingDef DarkTemple  = new("dark_temple", "诅咒神殿", 140, 20,  700,  3.2f, new[] { DarkArcher });
         public static readonly BuildingDef DeathStable = new("death_stable","死亡马厩", 180, 40,  800,  3.6f, new[] { DeathKnight });
 
-        public static readonly BuildingDef[] HumanBuildings  = { Barracks, Archery, Stable, Lumber, Tower };
-        public static readonly BuildingDef[] UndeadBuildings = { Crypt, DarkTemple, DeathStable, Lumber, Tower };
+        public static readonly BuildingDef[] HumanBuildings  = { Barracks, Archery, Stable, Lumber, Tower, House };
+        public static readonly BuildingDef[] UndeadBuildings = { Crypt, DarkTemple, DeathStable, Lumber, Tower, House };
     }
 }

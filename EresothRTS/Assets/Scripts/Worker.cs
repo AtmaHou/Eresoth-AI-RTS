@@ -22,6 +22,7 @@ namespace Eresoth
         {
             if (Game.I.over) return;
             float dt = Time.deltaTime;
+            u.busy = state != State.Idle;   // 采集中时 Unit.Update 让位，由本状态机驱动移动
             switch (state)
             {
                 case State.ToNode:

@@ -24,54 +24,23 @@ namespace Eresoth
         {
             var root = new GameObject(def.name);
             root.transform.position = pos;
+            // 随机朝向（AI 槽位建筑不再千篇一律），主基地面向地图中心
+            if (def.kind != "hall")
+                root.transform.rotation = Quaternion.Euler(0, Mathf.Floor(Random.value * 4) * 90f, 0);
+            else if (pos.sqrMagnitude > 0.1f)
+                root.transform.rotation = Quaternion.LookRotation(-pos.normalized);
 
-            Color body = team == Team.Player
-                ? (def.kind == "hall" ? new Color(.85f, .82f, .70f) : new Color(.70f, .65f, .50f))
-                : (def.kind == "hall" ? new Color(.35f, .25f, .45f) : new Color(.30f, .28f, .35f));
-            Color top = team == Team.Player ? new Color(.95f, .80f, .35f) : new Color(.50f, .90f, .80f);
             float s = def.size;
-
-            // 造型按 kind 差异化组合（仍全程序化图元）
-            switch (def.kind)
+            // 外观：完整风格化建筑（基座/屋顶/门窗/旗帜/阵营装饰），全部程序化拼装
+            if (def.prefab != null)
             {
-                case "hall":      // 主基地：大本体 + 中层 + 圆顶
-                    Gfx.Prim(PrimitiveType.Cube, root.transform, new Vector3(0, s * 0.4f, 0), new Vector3(s, s * 0.8f, s), body);
-                    Gfx.Prim(PrimitiveType.Cube, root.transform, new Vector3(0, s * 0.9f, 0), new Vector3(s * 0.6f, s * 0.28f, s * 0.6f), body);
-                    Gfx.Prim(PrimitiveType.Sphere, root.transform, new Vector3(0, s * 1.15f, 0), Vector3.one * s * 0.35f, top);
-                    break;
-                case "barracks":  // 兵营/地穴：本体 + 角楼
-                case "crypt":
-                    Gfx.Prim(PrimitiveType.Cube, root.transform, new Vector3(0, s * 0.4f, 0), new Vector3(s, s * 0.8f, s), body);
-                    Gfx.Prim(PrimitiveType.Cylinder, root.transform, new Vector3(s * 0.42f, s * 0.65f, s * 0.42f),
-                             new Vector3(s * 0.3f, s * 0.6f, s * 0.3f), top);
-                    break;
-                case "archery":   // 弓箭场/诅咒神殿：圆柱塔身 + 球顶
-                case "dark_temple":
-                    Gfx.Prim(PrimitiveType.Cylinder, root.transform, new Vector3(0, s * 0.55f, 0),
-                             new Vector3(s * 0.8f, s * 1.1f, s * 0.8f), body);
-                    Gfx.Prim(PrimitiveType.Sphere, root.transform, new Vector3(0, s * 1.2f, 0), Vector3.one * s * 0.4f, top);
-                    break;
-                case "stable":    // 马厩/死亡马厩：宽扁棚屋 + 门柱
-                case "death_stable":
-                    Gfx.Prim(PrimitiveType.Cube, root.transform, new Vector3(0, s * 0.3f, 0),
-                             new Vector3(s * 1.4f, s * 0.6f, s * 1.1f), body);
-                    Gfx.Prim(PrimitiveType.Cylinder, root.transform, new Vector3(s * 0.55f, s * 0.5f, s * 0.45f),
-                             new Vector3(s * 0.18f, s, s * 0.18f), top);
-                    Gfx.Prim(PrimitiveType.Cylinder, root.transform, new Vector3(-s * 0.55f, s * 0.5f, s * 0.45f),
-                             new Vector3(s * 0.18f, s, s * 0.18f), top);
-                    break;
-                case "lumber":    // 伐木场：本体 + 横放原木
-                    Gfx.Prim(PrimitiveType.Cube, root.transform, new Vector3(0, s * 0.4f, 0), new Vector3(s, s * 0.8f, s), body);
-                    var log = Gfx.Prim(PrimitiveType.Cylinder, root.transform, new Vector3(0, s * 0.9f, 0),
-                             new Vector3(s * 0.25f, s * 0.9f, s * 0.25f), top);
-                    log.transform.localRotation = Quaternion.Euler(0, 0, 90f);
-                    break;
-                default:          // 箭塔：高瘦塔身 + 塔顶平台
-                    Gfx.Prim(PrimitiveType.Cube, root.transform, new Vector3(0, s * 0.6f, 0),
-                             new Vector3(s * 0.7f, s * 1.2f, s * 0.7f), body);
-                    Gfx.Prim(PrimitiveType.Cube, root.transform, new Vector3(0, s * 1.2f + s * 0.14f, 0),
-                             new Vector3(s * 0.55f, s * 0.28f, s * 0.55f), top);
-                    break;
+                var inst = Object.Instantiate(def.prefab, root.transform, false);
+                inst.transform.localPosition = Vector3.zero;
+                inst.transform.localRotation = Quaternion.identity;
+            }
+            else
+            {
+                Models.BuildBuilding(root.transform, team, def.kind, s);
             }
 
             var col = root.AddComponent<BoxCollider>();
@@ -109,7 +78,9 @@ namespace Eresoth
                     var def = queue[0];
                     queue.RemoveAt(0);
                     Vector2 c = Random.insideUnitCircle * 1.5f;
-                    Unit.Spawn(team, def, rally + new Vector3(c.x, 0, c.y));
+                    var spawnP = rally + new Vector3(c.x, 0, c.y);
+                    spawnP.y = Game.TerrainHeight(spawnP.x, spawnP.z);
+                    Unit.Spawn(team, def, spawnP);
                 }
             }
 
@@ -152,8 +123,8 @@ namespace Eresoth
         {
             var g = Game.I;
             if (queue.Count >= 5) { if (team == g.playerTeam) g.Toast("生产队列已满"); return false; }
-            if (g.PopCount((int)team) + unitDef.pop > GameConfig.PopCap)
-            { if (team == g.playerTeam) g.Toast("人口已达上限"); return false; }
+            if (g.PopCount((int)team) + unitDef.pop > g.PopCap(team))
+            { if (team == g.playerTeam) g.Toast("人口已达上限（建民居可提升）"); return false; }
             if (unitDef.hero && g.units.Exists(u => u.team == team && u.def.hero))
             { if (team == g.playerTeam) g.Toast("英雄只能同时存在一位"); return false; }
             if (!g.TrySpend((int)team, unitDef.wood, unitDef.mana)) return false;

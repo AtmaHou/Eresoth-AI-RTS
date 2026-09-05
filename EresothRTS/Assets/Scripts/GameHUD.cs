@@ -36,7 +36,7 @@ namespace Eresoth
             string faction = g.playerTeam == Team.Player ? "人类" : "不死族";
             GUI.Box(new Rect(0, 0, Screen.width, 26), GUIContent.none);
             GUI.Label(new Rect(12, 3, 760, 22),
-                $"【{faction}】木头 {g.wood[pi]}    魔法矿 {g.mana[pi]}    人口 {g.PopCount(pi)}/{GameConfig.PopCap}" +
+                $"【{faction}】木头 {g.wood[pi]}    魔法矿 {g.mana[pi]}    人口 {g.PopCount(pi)}/{g.PopCap(g.playerTeam)}" +
                 $"    攻+{g.atkLevel[pi] * 15}%  防+{g.defLevel[pi] * 15}%    种子 {g.seed}", mid);
             GUI.Label(new Rect(Screen.width - 430, 3, 420, 22),
                 "左键框选 | 右键移动/攻击/采集 | WASD滚屏 | 滚轮缩放", mid);
@@ -127,16 +127,17 @@ namespace Eresoth
                     for (int i = 0; i < list.Length; i++)
                     {
                         var bd = list[i];
-                        bool unique = bd.kind != "tower";   // 箭塔可建多座
-                        int towers = g.buildings.FindAll(x => x.team == b.team && x.kind == "tower").Count;
-                        bool built = unique && g.BuildingOfKind(b.team, bd.kind) != null;
+                        int n = g.buildings.FindAll(x => x.team == b.team && x.kind == bd.kind).Count;
+                        bool multi = bd.kind == "tower" || bd.kind == "house";   // 箭塔/民居可建多座
+                        bool built = !multi && n > 0;
                         string cost = bd.mana > 0 ? $"{bd.wood}木+{bd.mana}矿" : $"{bd.wood}木";
                         bool afford = g.wood[bi] >= bd.wood && g.mana[bi] >= bd.mana;
-                        string label = bd.kind == "tower" ? $"建造{bd.name}({towers}/{Game.TowerCap})"
+                        string label = bd.kind == "tower" ? $"建造{bd.name}({n}/{Game.TowerCap})"
+                            : multi ? $"建造{bd.name}({n})"
                             : built ? $"{bd.name}已建成" : $"建造{bd.name}({cost})";
-                        bool canDo = bd.kind == "tower" ? towers < Game.TowerCap && afford : !built && afford;
+                        bool canDo = bd.kind == "tower" ? n < Game.TowerCap && afford : multi ? afford : !built && afford;
                         var def = bd;
-                        Btn(new Rect(190 + i * 180, y + 30, 170, 30), label,
+                        Btn(new Rect(190 + i * 145, y + 30, 140, 30), label,
                             () => sel.BeginPlacement(def), canDo);
                     }
                 }

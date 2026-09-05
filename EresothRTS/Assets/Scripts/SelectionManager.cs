@@ -178,7 +178,8 @@ namespace Eresoth
         {
             var ray = cam.ScreenPointToRay(Input.mousePosition);
             if (!Physics.Raycast(ray, out var hit, 500f)) return;
-            Vector3 p = hit.point; p.y = 0;
+            Vector3 p = hit.point;
+            p.y = Game.TerrainHeight(p.x, p.z);
 
             bool valid = Game.I.CanPlaceAt(Game.I.playerTeam, placing, p, out _);
             ghost.transform.position = p + Vector3.up * placing.size * 0.4f;
@@ -201,7 +202,7 @@ namespace Eresoth
             ClearRings();
             selected.Clear(); selected.AddRange(list);
             selBuilding = null;
-            foreach (var u in selected) u.ring.SetActive(true);
+            foreach (var u in selected) u.ring.gameObject.SetActive(true);
         }
 
         void SelectBuilding(Building b)
@@ -217,7 +218,7 @@ namespace Eresoth
 
         void ClearRings()
         {
-            foreach (var u in selected) if (u != null) u.ring.SetActive(false);
+            foreach (var u in selected) if (u != null) u.ring.gameObject.SetActive(false);
         }
 
         // ---------- 框选框绘制 ----------

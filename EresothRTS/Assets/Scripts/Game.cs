@@ -123,33 +123,57 @@ namespace Eresoth
 
         void BuildWorld()
         {
-            // 灯光
+            // 灯光：暖阳 + 柔和环境光 + 程序化天空盒，营造午后魔幻森林氛围
             var lightGo = new GameObject("Sun");
             var light = lightGo.AddComponent<Light>();
             light.type = LightType.Directional;
-            light.intensity = 1.1f;
-            lightGo.transform.rotation = Quaternion.Euler(50, -30, 0);
-            RenderSettings.ambientLight = new Color(0.45f, 0.45f, 0.5f);
+            light.intensity = 1.25f;
+            light.color = new Color(1f, .96f, .88f);
+            light.shadows = LightShadows.Soft;
+            light.shadowStrength = .85f;
+            lightGo.transform.rotation = Quaternion.Euler(48, -35, 0);
+            RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
+            RenderSettings.ambientSkyColor = new Color(.55f, .62f, .75f);
+            RenderSettings.ambientEquatorColor = new Color(.48f, .50f, .48f);
+            RenderSettings.ambientGroundColor = new Color(.30f, .28f, .22f);
+            BuildSky();
 
-            // 地面与边界
-            var ground = GameObject.CreatePrimitive(PrimitiveType.Plane);
-            ground.name = "Ground";
-            ground.transform.localScale = new Vector3(13, 1, 13); // 130x130
-            ground.GetComponent<Renderer>().sharedMaterial = Gfx.Mat(new Color(0.23f, 0.32f, 0.20f));
-            Color rock = new Color(0.30f, 0.28f, 0.30f);
-            Gfx.Prim(PrimitiveType.Cube, null, new Vector3(0, 3,  68), new Vector3(150, 7, 6), rock).name = "Wall";
-            Gfx.Prim(PrimitiveType.Cube, null, new Vector3(0, 3, -68), new Vector3(150, 7, 6), rock).name = "Wall";
-            Gfx.Prim(PrimitiveType.Cube, null, new Vector3( 68, 3, 0), new Vector3(6, 7, 150), rock).name = "Wall";
-            Gfx.Prim(PrimitiveType.Cube, null, new Vector3(-68, 3, 0), new Vector3(6, 7, 150), rock).name = "Wall";
+            // 地面：低多边形起伏地形（噪声位移网格），不再是平板
+            BuildTerrain();
+            Color rock = new Color(0.34f, 0.32f, 0.35f);
+            BuildCliffs(rock);
 
             // 地图种子与丰富度：随机模式每局不同，关闭则用固定种子可复现
             seed = MapSettings.randomMap ? Random.Range(1, int.MaxValue) : 20240901;
             float richness = MapSettings.Richness;
             var rnd = new System.Random(seed);
 
-            // 树木：丰富度决定数量，位置随机（避开双方基地与中央）
+            // ---- 资源生成：只为 0 号基地一侧布局，1 号取中心对称点（-p），从布局上保证双方公平 ----
             int treeCount = Mathf.RoundToInt(26 * richness);
-            for (int i = 0; i < treeCount; i++)
+            const int homeTrees = 9;   // 每方基地旁保底的"家树"数量，距离基地 16~26
+
+            void PlaceWood(Vector3 p) { p.y = TerrainHeight(p.x, p.z); ResourceNode.Spawn("wood", p); }
+            void PlaceMana(Vector3 p) { p.y = TerrainHeight(p.x, p.z); ResourceNode.Spawn("mana", p); }
+
+            // 家树：围绕 0 号基地环带生成，镜像到 1 号（间距校验对两侧都做）
+            for (int i = 0; i < homeTrees; i++)
+            {
+                Vector3 p = Vector3.zero;
+                int guard = 0;
+                do
+                {
+                    double a = rnd.NextDouble() * 6.283, r = 16 + rnd.NextDouble() * 10;
+                    p = baseCenter[0] + new Vector3((float)(System.Math.Cos(a) * r), 0, (float)(System.Math.Sin(a) * r));
+                    guard++;
+                }
+                while (guard < 60 && (Mathf.Abs(p.x) > 55 || Mathf.Abs(p.z) > 55
+                                    || NearNode(p, 4f) || NearNode(-p, 4f)));
+                PlaceWood(p); PlaceWood(-p);
+            }
+
+            // 野树：中场随机，成对镜像（避开双方基地 15 格与中央 10 格）
+            int wild = Mathf.Max(0, (treeCount - homeTrees * 2) / 2);
+            for (int i = 0; i < wild; i++)
             {
                 Vector3 p = Vector3.zero;
                 int guard = 0;
@@ -161,36 +185,252 @@ namespace Eresoth
                 while (guard < 60 && (Vector3.Distance(p, baseCenter[0]) < 15
                                     || Vector3.Distance(p, baseCenter[1]) < 15
                                     || p.magnitude < 10
-                                    || NearNode(p, 4f)));
-                ResourceNode.Spawn("wood", p);
+                                    || NearNode(p, 4f) || NearNode(-p, 4f)));
+                PlaceWood(p); PlaceWood(-p);
             }
 
-            // 魔法矿：双方基地附近各一半 + 中场争夺点，数量随丰富度、位置随种子
+            // 魔法矿：近矿（9~13 环带）围绕 0 号基地生成并镜像 → 双方"起始矿"距离结构完全一致
             int manaCount = Mathf.Max(2, Mathf.RoundToInt(4 * richness));
             int perBase = manaCount / 2, center = manaCount - perBase * 2;
-            for (int side = 0; side < 2; side++)
-                for (int i = 0; i < perBase; i++)
-                {
-                    double a = rnd.NextDouble() * 6.283, r = 9 + rnd.NextDouble() * 4;
-                    ResourceNode.Spawn("mana", baseCenter[side] + new Vector3(
-                        (float)(System.Math.Cos(a) * r), 0, (float)(System.Math.Sin(a) * r)));
-                }
-            for (int i = 0; i < center; i++)
+            for (int i = 0; i < perBase; i++)
             {
                 Vector3 p = Vector3.zero;
                 int guard = 0;
                 do
                 {
-                    p = new Vector3((float)(rnd.NextDouble() * 50 - 25), 0, (float)(rnd.NextDouble() * 50 - 25));
+                    double a = rnd.NextDouble() * 6.283, r = 9 + rnd.NextDouble() * 4;
+                    p = baseCenter[0] + new Vector3((float)(System.Math.Cos(a) * r), 0, (float)(System.Math.Sin(a) * r));
                     guard++;
                 }
-                while (guard < 60 && (p.magnitude < 12 || NearNode(p, 5f)));
-                ResourceNode.Spawn("mana", p);
+                while (guard < 60 && (NearNode(p, 5f) || NearNode(-p, 5f)));
+                PlaceMana(p); PlaceMana(-p);
             }
+            // 中场争夺矿：成对镜像；奇数时最后一座放在对称轴上（同样公平）
+            for (int i = 0; i < center / 2; i++)
+            {
+                Vector3 p = Vector3.zero;
+                int guard = 0;
+                do
+                {
+                    p = new Vector3((float)(rnd.NextDouble() * 44 - 22), 0, (float)(rnd.NextDouble() * 44 - 22));
+                    guard++;
+                }
+                while (guard < 60 && (p.magnitude < 12 || NearNode(p, 5f) || NearNode(-p, 5f)));
+                PlaceMana(p); PlaceMana(-p);
+            }
+            if (center % 2 == 1)
+            {
+                float zz = (float)(14 + rnd.NextDouble() * 8) * (rnd.NextDouble() < .5 ? 1 : -1);
+                var p = new Vector3(0, 0, zz);
+                if (NearNode(p, 5f)) p.x = 9;
+                PlaceMana(p);
+            }
+
+            // 纯装饰植被：草丛/灌木/岩石/花/倒木，提升地面细节密度
+            ScatterDecor(rnd, richness);
 
             // 双方基地：工人按"该阵营所属玩家选择的种族"配置（玩家选了不死则 0 号位用侍僧体系）
             SpawnBase(Team.Player, playerTeam == Team.Player ? GameConfig.Farmer : GameConfig.Acolyte);
             SpawnBase(Team.Enemy, playerTeam == Team.Player ? GameConfig.Acolyte : GameConfig.Farmer);
+        }
+
+        // ---------------- 天空 / 地形 / 悬崖 / 装饰 ----------------
+
+        /// <summary>程序化渐变天空盒：大反转球体 + 渐变贴图（天顶蓝→地平线暖白），零外部资源。
+        /// 注：URP/Unlit 不乘顶点色，所以颜色走贴图而非顶点色。</summary>
+        void BuildSky()
+        {
+            const int rings = 10, segs = 24;
+            var verts = new List<Vector3>();
+            var uvs = new List<Vector2>();
+            var tris = new List<int>();
+            var zenith = new Color(.28f, .5f, .82f);
+            var horizon = new Color(.88f, .88f, .92f);
+            for (int r = 0; r <= rings; r++)
+            {
+                float t = r / (float)rings;            // 0=天顶 1=地平线之下
+                float ang = t * Mathf.PI * .62f;
+                float y = Mathf.Cos(ang), rad = Mathf.Sin(ang);
+                for (int s = 0; s < segs; s++)
+                {
+                    float a = s * Mathf.PI * 2 / segs;
+                    verts.Add(new Vector3(Mathf.Cos(a) * rad, y, Mathf.Sin(a) * rad) * 400f);
+                    uvs.Add(new Vector2(0f, t));
+                }
+            }
+            for (int r = 0; r < rings; r++)
+                for (int s = 0; s < segs; s++)
+                {
+                    int a = r * segs + s, b = r * segs + (s + 1) % segs;
+                    int c = a + segs, d = b + segs;
+                    tris.AddRange(new[] { a, b, c, b, d, c });
+                }
+            var mesh = new Mesh { name = "sky", vertices = verts.ToArray(), triangles = tris.ToArray(), uv = uvs.ToArray() };
+            mesh.RecalculateNormals();
+            var go = new GameObject("Sky");
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var mr = go.AddComponent<MeshRenderer>();
+
+            // 渐变贴图（V 轴：0=天顶 1=地平线）
+            const int texRes = 256;
+            var tex = new Texture2D(1, texRes, TextureFormat.RGB24, false)
+            { filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp };
+            for (int i = 0; i < texRes; i++)
+                tex.SetPixel(0, i, Color.Lerp(zenith, horizon, Mathf.Pow(i / (float)(texRes - 1), 1.4f)));
+            tex.Apply();
+
+            bool urp = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null;
+            var mat = new Material(Shader.Find(urp ? "Universal Render Pipeline/Unlit" : "Sprites/Default"));
+            if (urp)
+            {
+                mat.SetTexture("_BaseMap", tex);
+                mat.SetColor("_BaseColor", Color.white);
+            }
+            else mat.SetTexture("_MainTex", tex);
+            mr.sharedMaterial = mat;
+        }
+
+        /// <summary>给定世界坐标采样地形高度（与 BuildTerrain 使用同一噪声算法）。</summary>
+        public static float TerrainHeight(float x, float z)
+        {
+            float h = Mathf.PerlinNoise(x * .04f + 7, z * .04f + 3) * 2.6f
+                    + Mathf.PerlinNoise(x * .11f + 2, z * .11f + 9) * .8f - 1.2f;
+            float flat = Mathf.Min(
+                Vector2.Distance(new Vector2(x, z), new Vector2(-38, -38)),
+                Vector2.Distance(new Vector2(x, z), new Vector2(38, 38)));
+            float flatK = Mathf.InverseLerp(14f, 24f, flat);
+            float centerK = Mathf.InverseLerp(8f, 16f, new Vector2(x, z).magnitude);
+            return h * Mathf.Min(flatK, centerK);
+        }
+
+        /// <summary>低多边形起伏地形：Perlin 噪声位移的网格，基地与中央区域自动整平。
+        /// 颜色烘成小尺寸贴图（URP Lit/Simple Lit 不乘顶点色，直接赋顶点色会渲成白色）。</summary>
+        void BuildTerrain()
+        {
+            const int size = 130, res = 52;
+            float half = size * .5f;
+            var verts = new Vector3[(res + 1) * (res + 1)];
+            var uvs = new Vector2[verts.Length];
+            var tris = new List<int>();
+            for (int z = 0; z <= res; z++)
+                for (int x = 0; x <= res; x++)
+                {
+                    int i = z * (res + 1) + x;
+                    float wx = x / (float)res * size - half;
+                    float wz = z / (float)res * size - half;
+                    verts[i] = new Vector3(wx, TerrainHeight(wx, wz), wz);
+                    uvs[i] = new Vector2(x / (float)res, z / (float)res);
+                }
+            for (int z = 0; z < res; z++)
+                for (int x = 0; x < res; x++)
+                {
+                    int a = z * (res + 1) + x, b = a + 1, c = a + res + 1, d = c + 1;
+                    tris.AddRange(new[] { a, c, b, b, c, d });
+                }
+            var mesh = new Mesh { name = "terrain", vertices = verts, triangles = tris.ToArray(), uv = uvs };
+            mesh.RecalculateNormals();
+            mesh.RecalculateBounds();
+            var go = new GameObject("Terrain");
+            go.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var mr = go.AddComponent<MeshRenderer>();
+
+            // 颜色烘焙贴图：与顶点着色同一函数，任意管线下都可见
+            const int texRes = 256;
+            var tex = new Texture2D(texRes, texRes, TextureFormat.RGB24, false)
+            { filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp };
+            for (int z = 0; z < texRes; z++)
+                for (int x = 0; x < texRes; x++)
+                {
+                    float wx = x / (float)(texRes - 1) * size - half;
+                    float wz = z / (float)(texRes - 1) * size - half;
+                    tex.SetPixel(x, z, TerrainColor(wx, wz, TerrainHeight(wx, wz)));
+                }
+            tex.Apply();
+
+            bool urp = UnityEngine.Rendering.GraphicsSettings.currentRenderPipeline != null;
+            Shader sh = urp ? Shader.Find("Universal Render Pipeline/Simple Lit") : Shader.Find("Standard");
+            if (sh == null) sh = Shader.Find("Standard");
+            var mat = new Material(sh);
+            mat.SetTexture(urp ? "_BaseMap" : "_MainTex", tex);
+            if (urp) mat.SetColor("_BaseColor", Color.white); else mat.color = Color.white;
+            mr.sharedMaterial = mat;
+            var mc = go.AddComponent<MeshCollider>();
+            mc.sharedMesh = mesh;
+        }
+
+        /// <summary>地形顶点/贴图颜色：低处偏泥土，高处草色变化，叠加细噪声。</summary>
+        static Color TerrainColor(float wx, float wz, float h)
+        {
+            var grassA = new Color(.30f, .42f, .22f);
+            var grassB = new Color(.38f, .50f, .26f);
+            var dirt = new Color(.42f, .36f, .24f);
+            float g = Mathf.PerlinNoise(wx * .07f, wz * .07f);
+            var c = Color.Lerp(grassA, grassB, g);
+            if (h < -.5f) c = Color.Lerp(c, dirt, Mathf.InverseLerp(-.5f, -1.6f, h));
+            return c * (.95f + Mathf.PerlinNoise(wx * .5f, wz * .5f) * .1f);
+        }
+
+        /// <summary>边界悬崖：不规则岩壁 + 顶部长草 + 远山剪影，取代平板墙。</summary>
+        void BuildCliffs(Color rock)
+        {
+            var rnd = new System.Random(seed + 99);
+            for (int side = 0; side < 4; side++)
+            {
+                bool horiz = side < 2;
+                float sign = side % 2 == 0 ? 1 : -1;
+                for (int i = 0; i < 14; i++)
+                {
+                    float t = -65f + i * 10f + (float)rnd.NextDouble() * 4f;
+                    float w = 8f + (float)rnd.NextDouble() * 6f;
+                    float h = 6f + (float)rnd.NextDouble() * 4f;
+                    float d = 5f + (float)rnd.NextDouble() * 3f;
+                    Vector3 pos = horiz ? new Vector3(t, h * .35f, sign * (66 + d * .2f))
+                                        : new Vector3(sign * (66 + d * .2f), h * .35f, t);
+                    var c = rock * (.85f + (float)rnd.NextDouble() * .3f);
+                    var cliff = Gfx.MeshGo(Gfx.Frustum(.55f + (float)rnd.NextDouble() * .3f, 5 + rnd.Next(3)),
+                                   null, pos, new Vector3(w, h, d), c, 0f, .2f);
+                    cliff.transform.rotation = Quaternion.Euler(0, (float)rnd.NextDouble() * 360, 0);
+                    // 崖顶草盖
+                    Gfx.Prim(PrimitiveType.Cylinder, cliff.transform, Vector3.up * 1.02f,
+                             new Vector3(1.02f, .06f, 1.02f), new Color(.32f, .45f, .24f) * (.8f + (float)rnd.NextDouble() * .4f), 0f, .2f);
+                }
+            }
+            // 远山剪影（四角之外，两倍距离）
+            for (int i = 0; i < 8; i++)
+            {
+                float a = i * Mathf.PI * 2 / 8 + .3f;
+                float dist = 120 + (float)rnd.NextDouble() * 40;
+                var pos = new Vector3(Mathf.Cos(a) * dist, 0, Mathf.Sin(a) * dist);
+                float w = 30 + (float)rnd.NextDouble() * 26;
+                float h = 18 + (float)rnd.NextDouble() * 16;
+                var c = Color.Lerp(new Color(.45f, .5f, .6f), new Color(.6f, .65f, .75f), (float)rnd.NextDouble());
+                var m = Gfx.MeshGo(Gfx.Frustum(.12f, 5), null, pos, new Vector3(w, h, w * .8f), c, 0f, .15f);
+                m.transform.rotation = Quaternion.Euler(0, (float)rnd.NextDouble() * 360, 0);
+                Gfx.MeshGo(Gfx.Frustum(.1f, 5), m.transform, Vector3.up * .72f, new Vector3(.32f, .3f, .26f),
+                           new Color(.92f, .94f, .98f), 0f, .4f);
+            }
+        }
+
+        /// <summary>纯装饰植被：草簇/灌木/岩石/小花/倒木，丰富地面细节。</summary>
+        void ScatterDecor(System.Random rnd, float richness)
+        {
+            int n = Mathf.RoundToInt(90 * richness);
+            for (int i = 0; i < n; i++)
+            {
+                var p = new Vector3((float)(rnd.NextDouble() * 116 - 58), 0, (float)(rnd.NextDouble() * 116 - 58));
+                if (Vector3.Distance(p, baseCenter[0]) < 13 || Vector3.Distance(p, baseCenter[1]) < 13) continue;
+                if (NearNode(p, 2.5f)) continue;
+                p.y = TerrainHeight(p.x, p.z);
+                var holder = new GameObject("decor").transform;
+                holder.position = p;
+                holder.rotation = Quaternion.Euler(0, (float)rnd.NextDouble() * 360, 0);
+                double roll = rnd.NextDouble();
+                if (roll < .38) Models.GrassTuft(holder, rnd);
+                else if (roll < .58) Models.Bush(holder, rnd);
+                else if (roll < .78) Models.Rock(holder, rnd);
+                else if (roll < .92) Models.Flower(holder, rnd);
+                else Models.FallenLog(holder, rnd);
+            }
         }
 
         bool NearNode(Vector3 p, float dist)
@@ -203,11 +443,14 @@ namespace Eresoth
         void SpawnBase(Team team, UnitDef workerDef)
         {
             var c = baseCenter[(int)team];
+            c.y = TerrainHeight(c.x, c.z);
             Building.Spawn(team, GameConfig.Hall, c);
             for (int i = 0; i < 4; i++)
             {
                 float a = i * 1.57f;
-                Unit.Spawn(team, workerDef, c + new Vector3(Mathf.Cos(a) * 6, 0, Mathf.Sin(a) * 6));
+                var up = c + new Vector3(Mathf.Cos(a) * 6, 0, Mathf.Sin(a) * 6);
+                up.y = TerrainHeight(up.x, up.z);
+                Unit.Spawn(team, workerDef, up);
             }
         }
 
@@ -255,6 +498,11 @@ namespace Eresoth
             return c;
         }
 
+        /// <summary>人口上限：主基地 40 + 每座民居 15，封顶 100。</summary>
+        public int PopCap(Team t)
+            => Mathf.Min(GameConfig.MaxPopCap,
+                GameConfig.BasePop + GameConfig.HousePop * buildings.FindAll(b => b.team == t && b.kind == "house").Count);
+
         // 科技乘区：不改单位静态数值，出手/受伤时实时计算
         public float AtkMult(int team) => 1f + 0.15f * atkLevel[team];
         public float DefMult(int team) => Mathf.Pow(1f / 1.15f, defLevel[team]);
@@ -271,7 +519,7 @@ namespace Eresoth
         // ---------------- 建造（AI 用固定槽位；玩家自由选址） ----------------
 
         public const float BuildRadius = 32f;   // 玩家建筑需距己方主基地此范围内
-        public const int TowerCap = 8;          // 箭塔建造上限（其他建筑全场唯一）
+        public const int TowerCap = 8;          // 箭塔建造上限；民居可建多座；其余建筑全场唯一
 
         static readonly Vector3[] BuildSlots =
         {
@@ -279,16 +527,18 @@ namespace Eresoth
             new Vector3(0, 0, 11), new Vector3(0, 0, -11), new Vector3(13, 0, 0), new Vector3(-13, 0, 0),
         };
 
-        /// <summary>AI 建建筑：固定槽位、同 kind 全场一座。</summary>
+        /// <summary>AI 建建筑：固定槽位；民居/箭塔可建多座，其余同 kind 全场一座。</summary>
         public bool BuildStructure(Team team, BuildingDef def)
         {
-            if (BuildingOfKind(team, def.kind) != null)
+            bool multi = def.kind == "tower" || def.kind == "house";
+            if (!multi && BuildingOfKind(team, def.kind) != null)
             { if (team == playerTeam) Toast($"{def.name}已建成"); return false; }
 
             Vector3 c = baseCenter[(int)team];
             foreach (var off in BuildSlots)
             {
                 Vector3 p = c + off;
+                p.y = TerrainHeight(p.x, p.z);
                 bool occupied = false;
                 foreach (var b in buildings)
                     if (Vector3.Distance(p, b.transform.position) < 5f) { occupied = true; break; }
@@ -317,7 +567,7 @@ namespace Eresoth
             return true;
         }
 
-        /// <summary>玩家在指定位置建建筑：非箭塔同 kind 全场唯一，箭塔有数量上限。</summary>
+        /// <summary>玩家在指定位置建建筑：民居/箭塔可建多座（箭塔有上限），其余同 kind 全场唯一。</summary>
         public bool BuildAt(Team team, BuildingDef def, Vector3 p)
         {
             if (def.kind == "tower")
@@ -325,7 +575,7 @@ namespace Eresoth
                 int towers = buildings.FindAll(b => b.team == team && b.kind == "tower").Count;
                 if (towers >= TowerCap) { if (team == playerTeam) Toast($"箭塔最多 {TowerCap} 座"); return false; }
             }
-            else if (BuildingOfKind(team, def.kind) != null)
+            else if (def.kind != "house" && BuildingOfKind(team, def.kind) != null)
             { if (team == playerTeam) Toast($"{def.name}已建成"); return false; }
 
             if (!CanPlaceAt(team, def, p, out string err))
