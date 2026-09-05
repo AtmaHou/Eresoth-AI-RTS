@@ -67,7 +67,7 @@ namespace Eresoth
         {
             if (!Raycast(out var hit)) { ClearAll(); lastClick = null; return; }
             var u = hit.collider.GetComponentInParent<Unit>();
-            if (u != null && u.team == Team.Player)
+            if (u != null && u.team == Game.I.playerTeam)
             {
                 // 双击（0.3s 内连点同一单位）：选中屏幕内所有同类型单位
                 if (u == lastClick && Time.time - lastClickTime < 0.3f)
@@ -76,7 +76,7 @@ namespace Eresoth
                     var same = new List<Unit>();
                     foreach (var x in Game.I.units)
                     {
-                        if (x.team != Team.Player || x.def != u.def) continue;
+                        if (x.team != Game.I.playerTeam || x.def != u.def) continue;
                         var sp = cam.WorldToScreenPoint(x.transform.position);
                         if (sp.z > 0 && sp.x >= 0 && sp.x <= Screen.width && sp.y >= 0 && sp.y <= Screen.height)
                             same.Add(x);
@@ -90,7 +90,7 @@ namespace Eresoth
             }
             lastClick = null;
             var b = hit.collider.GetComponentInParent<Building>();
-            if (b != null && b.team == Team.Player) { SelectBuilding(b); return; }
+            if (b != null && b.team == Game.I.playerTeam) { SelectBuilding(b); return; }
             ClearAll();
         }
 
@@ -101,7 +101,7 @@ namespace Eresoth
             var list = new List<Unit>();
             foreach (var u in Game.I.units)
             {
-                if (u.team != Team.Player) continue;
+                if (u.team != Game.I.playerTeam) continue;
                 var sp = cam.WorldToScreenPoint(u.transform.position);
                 if (sp.z > 0 && rect.Contains(new Vector2(sp.x, sp.y))) list.Add(u);
             }
@@ -123,11 +123,11 @@ namespace Eresoth
             if (selected.Count == 0) return;
 
             var eu = hit.collider.GetComponentInParent<Unit>();
-            if (eu != null && eu.team == Team.Enemy)
+            if (eu != null && eu.team != Game.I.playerTeam)
             { foreach (var u in selected) u.CommandAttack(eu); return; }
 
             var eb = hit.collider.GetComponentInParent<Building>();
-            if (eb != null && eb.team == Team.Enemy)
+            if (eb != null && eb.team != Game.I.playerTeam)
             { foreach (var u in selected) u.CommandAttack(eb); return; }
 
             var node = hit.collider.GetComponentInParent<ResourceNode>();
@@ -180,7 +180,7 @@ namespace Eresoth
             if (!Physics.Raycast(ray, out var hit, 500f)) return;
             Vector3 p = hit.point; p.y = 0;
 
-            bool valid = Game.I.CanPlaceAt(Team.Player, placing, p, out _);
+            bool valid = Game.I.CanPlaceAt(Game.I.playerTeam, placing, p, out _);
             ghost.transform.position = p + Vector3.up * placing.size * 0.4f;
             ghost.transform.localScale = new Vector3(placing.size, placing.size * 0.8f, placing.size);
             ghost.GetComponent<Renderer>().sharedMaterial =

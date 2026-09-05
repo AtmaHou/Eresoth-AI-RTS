@@ -24,18 +24,28 @@ namespace Eresoth
 
         public bool over;
         public bool started;      // 世界是否已生成（开局设置面板确认后开始）
-        public int winner = -1;
+        public int winner = -1;   // 0=玩家胜 1=AI胜
         public int seed;          // 本局地图种子（固定种子模式可复现布局）
+        public Team playerTeam = Team.Player;   // 玩家操控的阵营（另一方归 AI）
         public string toast = "";
         float toastT;
+
+        readonly List<Projectile> projs = new();   // 飞行中的弹道
+
+        class Projectile
+        {
+            public Team team; public Unit shooter; public ITargetable target;
+            public Vector3 pos; public float dmg, aoe; public GameObject gfx;
+        }
 
         void Awake()
         {
             I = this;
             Application.targetFrameRate = 60;
-            // 相机在开局前就要存在，否则开始界面 "no game rendering" 报错
-            baseCenter[0] = new Vector3(-38, 0, -38); // 玩家：左下
-            baseCenter[1] = new Vector3( 38, 0,  38); // AI：右上
+            // 相机在开局前就要存在，否则开始界面 "no game rendering" 报错；朝向玩家基地
+            playerTeam = MapSettings.playerTeam;
+            baseCenter[0] = new Vector3(-38, 0, -38); // 0 号位：左下
+            baseCenter[1] = new Vector3( 38, 0,  38); // 1 号位：右上
             BuildCamera();
             gameObject.AddComponent<SelectionManager>();
             gameObject.AddComponent<EnemyAI>();
@@ -52,7 +62,61 @@ namespace Eresoth
 
         void Update()
         {
-            if (toastT > 0) toastT -= Time.deltaTime;
+            float dt = Time.deltaTime;
+            if (toastT > 0) toastT -= dt;
+            ProjStep(dt);
+        }
+
+        // ---------------- 弹道（远程兵种/英雄/箭塔共用） ----------------
+
+        /// <summary>发射一颗弹道：飞向目标，命中结算伤害；aoe > 0 时（英雄）在落点溅射。</summary>
+        public void SpawnProjectile(Team team, Vector3 from, ITargetable target, float dmg, float aoe = 0f, Unit shooter = null)
+        {
+            var gfx = Gfx.Prim(PrimitiveType.Sphere, null, from, Vector3.one * 0.35f,
+                     team == Team.Player ? new Color(1f, .85f, .3f) : new Color(.8f, .45f, 1f));
+            projs.Add(new Projectile { team = team, shooter = shooter, target = target,
+                                       pos = from, dmg = dmg, aoe = aoe, gfx = gfx });
+        }
+
+        void ProjStep(float dt)
+        {
+            for (int i = projs.Count - 1; i >= 0; i--)
+            {
+                var p = projs[i];
+                if (p.target == null || !p.target.Alive) { Destroy(p.gfx); projs.RemoveAt(i); continue; }
+                Vector3 dest = p.target.Pos + Vector3.up * 0.8f;
+                Vector3 to = dest - p.pos;
+                float step = 28f * dt;
+                if (to.magnitude <= step + 0.25f)
+                {
+                    p.target.Damage(p.dmg);
+                    if (p.target is Unit tu && p.shooter != null) tu.lastAttacker = p.shooter;
+                    if (p.aoe > 0f)
+                    {
+                        // 英雄远程 AOE：落点溅射
+                        foreach (var u in units)
+                        {
+                            if (u.team == p.team || !u.Alive) continue;
+                            if (Vector3.Distance(u.transform.position, p.target.Pos) > p.aoe) continue;
+                            u.Damage(p.dmg * GameConfig.SplashFrac);
+                            if (p.shooter != null) u.lastAttacker = p.shooter;
+                        }
+                    }
+                    Destroy(p.gfx); projs.RemoveAt(i);
+                    continue;
+                }
+                p.pos += to.normalized * step;
+                p.gfx.transform.position = p.pos;
+            }
+        }
+
+        /// <summary>英雄攻击光环：pos 附近存在己方英雄时，伤害 ×(1+bonus)。</summary>
+        public float AuraDmgMult(Team team, Vector3 pos)
+        {
+            foreach (var u in units)
+                if (u.def.hero && u.team == team && Vector3.Distance(u.transform.position, pos) < u.def.auraRadius)
+                    return 1f + u.def.auraBonus;
+            return 1f;
         }
 
         // ---------------- 世界构建 ----------------
@@ -124,8 +188,9 @@ namespace Eresoth
                 ResourceNode.Spawn("mana", p);
             }
 
-            SpawnBase(Team.Player, GameConfig.Farmer);
-            SpawnBase(Team.Enemy, GameConfig.Acolyte);
+            // 双方基地：工人按"该阵营所属玩家选择的种族"配置（玩家选了不死则 0 号位用侍僧体系）
+            SpawnBase(Team.Player, playerTeam == Team.Player ? GameConfig.Farmer : GameConfig.Acolyte);
+            SpawnBase(Team.Enemy, playerTeam == Team.Player ? GameConfig.Acolyte : GameConfig.Farmer);
         }
 
         bool NearNode(Vector3 p, float dist)
@@ -149,7 +214,7 @@ namespace Eresoth
         void BuildCamera()
         {
             var rig = new GameObject("CameraRig");
-            rig.transform.position = baseCenter[0] + new Vector3(0, 0, -4);
+            rig.transform.position = baseCenter[(int)playerTeam] + new Vector3(0, 0, -4);
             var camGo = new GameObject("Main Camera");
             camGo.tag = "MainCamera";
             camGo.AddComponent<Camera>();
@@ -167,7 +232,7 @@ namespace Eresoth
         {
             if (wood[team] < w || mana[team] < m)
             {
-                if (team == 0) Toast("资源不足");
+                if (team == (int)playerTeam) Toast("资源不足");
                 return false;
             }
             wood[team] -= w; mana[team] -= m;
@@ -200,7 +265,7 @@ namespace Eresoth
         {
             var t = GameConfig.Techs[techId];
             if (t.effect == TechEffect.Atk) atkLevel[(int)team]++; else defLevel[(int)team]++;
-            if (team == Team.Player) Toast($"研究完成：{t.name} Lv{TechLevel(team, t.effect)}");
+            if (team == playerTeam) Toast($"研究完成：{t.name} Lv{TechLevel(team, t.effect)}");
         }
 
         // ---------------- 建造（AI 用固定槽位；玩家自由选址） ----------------
@@ -218,7 +283,7 @@ namespace Eresoth
         public bool BuildStructure(Team team, BuildingDef def)
         {
             if (BuildingOfKind(team, def.kind) != null)
-            { if (team == Team.Player) Toast($"{def.name}已建成"); return false; }
+            { if (team == playerTeam) Toast($"{def.name}已建成"); return false; }
 
             Vector3 c = baseCenter[(int)team];
             foreach (var off in BuildSlots)
@@ -233,7 +298,7 @@ namespace Eresoth
                 Building.Spawn(team, def, p);
                 return true;
             }
-            if (team == Team.Player) Toast("基地周围没有空地");
+            if (team == playerTeam) Toast("基地周围没有空地");
             return false;
         }
 
@@ -258,13 +323,13 @@ namespace Eresoth
             if (def.kind == "tower")
             {
                 int towers = buildings.FindAll(b => b.team == team && b.kind == "tower").Count;
-                if (towers >= TowerCap) { if (team == Team.Player) Toast($"箭塔最多 {TowerCap} 座"); return false; }
+                if (towers >= TowerCap) { if (team == playerTeam) Toast($"箭塔最多 {TowerCap} 座"); return false; }
             }
             else if (BuildingOfKind(team, def.kind) != null)
-            { if (team == Team.Player) Toast($"{def.name}已建成"); return false; }
+            { if (team == playerTeam) Toast($"{def.name}已建成"); return false; }
 
             if (!CanPlaceAt(team, def, p, out string err))
-            { if (team == Team.Player) Toast(err); return false; }
+            { if (team == playerTeam) Toast(err); return false; }
             if (!TrySpend((int)team, def.wood, def.mana)) return false;
             Building.Spawn(team, def, p);
             return true;
@@ -304,8 +369,9 @@ namespace Eresoth
         public void CheckEnd()
         {
             if (over) return;
-            if (Hall(Team.Enemy) == null) { over = true; winner = 0; }
-            else if (Hall(Team.Player) == null) { over = true; winner = 1; }
+            var aiTeam = playerTeam == Team.Player ? Team.Enemy : Team.Player;
+            if (Hall(aiTeam) == null) { over = true; winner = 0; }
+            else if (Hall(playerTeam) == null) { over = true; winner = 1; }
         }
 
         public void Toast(string msg) { toast = msg; toastT = 2f; }
