@@ -42,8 +42,7 @@ namespace Eresoth
         {
             I = this;
             Application.targetFrameRate = 60;
-            // 相机在开局前就要存在，否则开始界面 "no game rendering" 报错；朝向玩家基地
-            playerTeam = MapSettings.playerTeam;
+            // 相机在开局前就要存在，否则开始界面 "no game rendering" 报错；开局时再按所选阵营对准基地
             baseCenter[0] = new Vector3(-38, 0, -38); // 0 号位：左下
             baseCenter[1] = new Vector3( 38, 0,  38); // 1 号位：右上
             BuildCamera();
@@ -57,6 +56,10 @@ namespace Eresoth
         {
             if (started) return;
             started = true;
+            // 阵营在开局面板里选，必须在此时才读取（Awake 早于玩家选择，先读会拿到默认值）
+            playerTeam = MapSettings.playerTeam;
+            var rig = GameObject.Find("CameraRig");
+            if (rig != null) rig.transform.position = baseCenter[(int)playerTeam] + new Vector3(0, 0, -4);
             BuildWorld();
         }
 
@@ -90,7 +93,7 @@ namespace Eresoth
                 if (to.magnitude <= step + 0.25f)
                 {
                     p.target.Damage(p.dmg);
-                    if (p.target is Unit tu && p.shooter != null) tu.lastAttacker = p.shooter;
+                    if (p.target is Unit tu && p.shooter != null) tu.NotifyAttacked(p.shooter);
                     if (p.aoe > 0f)
                     {
                         // 英雄远程 AOE：落点溅射
@@ -99,7 +102,7 @@ namespace Eresoth
                             if (u.team == p.team || !u.Alive) continue;
                             if (Vector3.Distance(u.transform.position, p.target.Pos) > p.aoe) continue;
                             u.Damage(p.dmg * GameConfig.SplashFrac);
-                            if (p.shooter != null) u.lastAttacker = p.shooter;
+                            if (p.shooter != null) u.NotifyAttacked(p.shooter);
                         }
                     }
                     Destroy(p.gfx); projs.RemoveAt(i);
@@ -608,6 +611,18 @@ namespace Eresoth
             foreach (var n in nodes)
             {
                 if (n.kind != kind) continue;
+                float d = Vector3.Distance(p, n.transform.position);
+                if (d < bd) { bd = d; best = n; }
+            }
+            return best;
+        }
+
+        /// <summary>不限种类：离 p 最近的资源点（建筑出厂判定集结点是否压在资源上）。</summary>
+        public ResourceNode NearestNodeAny(Vector3 p)
+        {
+            ResourceNode best = null; float bd = float.MaxValue;
+            foreach (var n in nodes)
+            {
                 float d = Vector3.Distance(p, n.transform.position);
                 if (d < bd) { bd = d; best = n; }
             }

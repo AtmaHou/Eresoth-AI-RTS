@@ -77,10 +77,21 @@ namespace Eresoth
                     timer = 0;
                     var def = queue[0];
                     queue.RemoveAt(0);
-                    Vector2 c = Random.insideUnitCircle * 1.5f;
-                    var spawnP = rally + new Vector3(c.x, 0, c.y);
+                    // 出厂：在建筑门口生成，自己走到集结点（不再瞬移到集结点）
+                    var dir = rally - transform.position; dir.y = 0;
+                    if (dir.sqrMagnitude < .01f) dir = Vector3.forward;
+                    dir.Normalize();
+                    Vector2 c = Random.insideUnitCircle * 1.2f;
+                    var spawnP = transform.position + dir * (radius + 1.5f) + new Vector3(-dir.z, 0, dir.x) * c.x + dir * c.y;
                     spawnP.y = Game.TerrainHeight(spawnP.x, spawnP.z);
-                    Unit.Spawn(team, def, spawnP);
+                    var u = Unit.Spawn(team, def, spawnP);
+                    // 集结点压在资源上时工人出厂即上工，其他单位/情况走到集结点
+                    var w = u.GetComponent<Worker>();
+                    var n = Game.I.NearestNodeAny(rally);
+                    if (w != null && n != null && Vector3.Distance(n.transform.position, rally) < 5f)
+                        w.GatherAt(n);
+                    else
+                        u.CommandMove(rally);
                 }
             }
 

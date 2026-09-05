@@ -200,7 +200,7 @@ namespace Eresoth
                 foreach (var kv in cnt) sb.Append($"{kv.Key}×{kv.Value}  ");
                 GUI.Label(new Rect(16, y, 900, 24), $"已选 {sel.selected.Count} 单位：{sb}", mid);
                 GUI.Label(new Rect(16, y + 30, 900, 24),
-                    "右键点地=移动 | 点敌人=攻击 | 农夫点树/水晶=采集 | Ctrl+数字=编队，数字=召回", mid);
+                    "右键点地=移动 | 点敌人=攻击 | 农夫点树/水晶=采集 | 选中建筑右键资源=派工人采集/右键地面=设集结点 | Ctrl+数字=编队", mid);
             }
             else
             {

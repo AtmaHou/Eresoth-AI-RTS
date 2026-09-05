@@ -124,7 +124,8 @@ namespace Eresoth
             if (Game.I.over) return;
             float dt = Time.deltaTime;
             if (stunT > 0) { stunT -= dt; Anim(0, dt); return; } // 瘫痪：静止
-            if (busy) { Anim(0, dt); return; }   // 采集循环由 WorkerAI 驱动
+            ResolveOverlap();                    // 碰撞体积：单位/建筑间推挤，防穿模
+            if (busy) return;   // 采集循环由 WorkerAI 驱动（移动与动画都在 Worker 里）
 
             // --- 目标决策：缓存目标失效则重寻最近敌（警戒范围） ---
             if (target == null || !target.Alive)
@@ -169,14 +170,14 @@ namespace Eresoth
                         else
                         {
                             target.Damage(dmg);
-                            if (target is Unit tu) tu.lastAttacker = this;
+                            if (target is Unit tu) tu.NotifyAttacked(this);
                             if (def.aoeRadius > 0f)
                                 foreach (var u in Game.I.units)
                                 {
                                     if (u.team == team || !u.Alive || u == target as Unit) continue;
                                     if (Vector3.Distance(u.transform.position, target.Pos) > def.aoeRadius) continue;
                                     u.Damage(def.dmg * GameConfig.SplashFrac);
-                                    u.lastAttacker = this;
+                                    u.NotifyAttacked(this);
                                 }
                         }
                     }
@@ -210,6 +211,52 @@ namespace Eresoth
             p.y = Game.TerrainHeight(p.x, p.z);
             transform.position = p;
         }
+
+        /// <summary>碰撞体积：与重叠的单位均摊推开、被建筑完全挤出，防止互相穿模。
+        /// 纯几何推挤（无刚体），每帧由 Unit.Update 调用。</summary>
+        void ResolveOverlap()
+        {
+            var p = transform.position;
+            foreach (var o in Game.I.units)
+            {
+                if (o == this || !o.Alive) continue;
+                float min = Radius + o.Radius;
+                var d = p - o.transform.position; d.y = 0;
+                float m = d.magnitude;
+                if (m < min)
+                    p += (m > .001f ? d / m : Vector3.right) * (min - m) * .5f;
+            }
+            foreach (var b in Game.I.buildings)
+            {
+                float min = Radius + b.radius;
+                var d = p - b.transform.position; d.y = 0;
+                float m = d.magnitude;
+                if (m < min)
+                    p += (m > .001f ? d / m : Vector3.right) * (min - m);
+            }
+            p.y = Game.TerrainHeight(p.x, p.z);
+            transform.position = p;
+        }
+
+        /// <summary>被攻击通知：记录攻击者并做"继续任务 vs 反击"的收益判断。
+        /// 无任务时交给 Update 的警戒自动索敌，不强制打断移动/撤退指令；工人不还手（战斗收益≈0）。</summary>
+        public void NotifyAttacked(Unit attacker)
+        {
+            if (attacker != null && attacker.team != team) lastAttacker = attacker;
+            if (Game.I.over || stunT > 0 || !Alive || attacker == null) return;
+            if (attacker.team == team || !attacker.Alive || def.worker) return;
+            if (target == null || !target.Alive) return;    // 无任务：由警戒索敌处理
+            float dNew = Vector3.Distance(transform.position, attacker.transform.position);
+            float dCur = Vector3.Distance(transform.position, target.Pos) - target.Radius;
+            // 当前目标已在射程内且不更远：继续当前任务收益更大
+            if (dCur <= def.range && dCur <= dNew + 1f) return;
+            // 攻击者远在水面外（远超警戒圈）：威胁低，继续赶路
+            if (dNew > def.aggro * 1.5f) return;
+            CommandAttack(attacker);
+        }
+
+        /// <summary>供 Worker 驱动行走动画（Worker 接管移动时 Unit.Update 不再调用 Anim）。</summary>
+        public void AnimWalk(bool moving, float dt) => Anim(moving ? 1f : 0f, dt);
 
         void Face(Vector3 dest)
         {

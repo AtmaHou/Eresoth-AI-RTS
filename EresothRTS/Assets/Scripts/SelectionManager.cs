@@ -113,9 +113,23 @@ namespace Eresoth
             lastClick = null;
             if (!Raycast(out var hit)) return;
 
-            // 选中建筑时：右键设置集结点
+            // 选中建筑时：右键资源点=派空闲工人去采集（集结点同步设到资源处，新工人出厂即上工）；右键地面=设集结点
             if (selBuilding != null)
             {
+                var node = hit.collider.GetComponentInParent<ResourceNode>();
+                if (node != null)
+                {
+                    selBuilding.rally = node.transform.position;
+                    int sent = 0;
+                    foreach (var u in Game.I.units)
+                    {
+                        if (u.team != Game.I.playerTeam || !u.def.worker) continue;
+                        var w = u.GetComponent<Worker>();
+                        if (w != null && w.state == Worker.State.Idle) { w.GatherAt(node); sent++; }
+                    }
+                    Game.I.Toast(sent > 0 ? $"已派 {sent} 个空闲工人去采集" : "没有空闲工人（集结点已设到资源处）");
+                    return;
+                }
                 if (hit.collider.GetComponentInParent<Building>() != selBuilding)
                     selBuilding.rally = hit.point;
                 return;
@@ -191,7 +205,7 @@ namespace Eresoth
                 || Input.GetMouseButtonDown(1)) CancelPlacement();
             else if (valid && Input.GetMouseButtonDown(0) && Input.mousePosition.y > 120)
             {
-                if (Game.I.BuildAt(Team.Player, placing, p)) CancelPlacement();
+                if (Game.I.BuildAt(Game.I.playerTeam, placing, p)) CancelPlacement();
             }
         }
 

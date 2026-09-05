@@ -54,6 +54,9 @@ namespace Eresoth
                     }
                     break;
             }
+
+            // 往返途中驱动走路动画（Unit.Update 在 busy 时不再调用 Anim）
+            u.AnimWalk(state == State.ToNode || state == State.Returning, dt);
         }
     }
 }
