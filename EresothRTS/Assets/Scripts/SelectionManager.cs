@@ -17,6 +17,8 @@ namespace Eresoth
 
         Vector3 downPos;
         Camera cam;
+        Unit lastClick;        // 双击检测：上次点选的单位
+        float lastClickTime;
 
         void Start() { cam = Camera.main; }
 
@@ -29,11 +31,13 @@ namespace Eresoth
             // 建造放置模式：拦截一切选择/指挥输入
             if (placing != null) { PlacementStep(); return; }
 
-            // 编队：Ctrl+数字 设置，数字 召回
+            // 编队：Ctrl+数字 设置（编辑器中 Ctrl+1~5 被 Unity 窗口快捷键占用，可用 Alt+数字代替），数字 召回
             for (int i = 0; i <= 9; i++)
             {
                 if (!Input.GetKeyDown(KeyCode.Alpha0 + i)) continue;
-                if (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl))
+                bool assign = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl)
+                           || Input.GetKey(KeyCode.LeftAlt) || Input.GetKey(KeyCode.RightAlt);
+                if (assign)
                 {
                     groups[i] = new List<Unit>(selected);
                     if (selected.Count > 0) Game.I.Toast($"编队 {i}：{selected.Count} 单位");
@@ -61,9 +65,30 @@ namespace Eresoth
 
         void ClickSelect()
         {
-            if (!Raycast(out var hit)) { ClearAll(); return; }
+            if (!Raycast(out var hit)) { ClearAll(); lastClick = null; return; }
             var u = hit.collider.GetComponentInParent<Unit>();
-            if (u != null && u.team == Team.Player) { SetSelected(new List<Unit> { u }); return; }
+            if (u != null && u.team == Team.Player)
+            {
+                // 双击（0.3s 内连点同一单位）：选中屏幕内所有同类型单位
+                if (u == lastClick && Time.time - lastClickTime < 0.3f)
+                {
+                    lastClick = null;
+                    var same = new List<Unit>();
+                    foreach (var x in Game.I.units)
+                    {
+                        if (x.team != Team.Player || x.def != u.def) continue;
+                        var sp = cam.WorldToScreenPoint(x.transform.position);
+                        if (sp.z > 0 && sp.x >= 0 && sp.x <= Screen.width && sp.y >= 0 && sp.y <= Screen.height)
+                            same.Add(x);
+                    }
+                    SetSelected(same);
+                    return;
+                }
+                lastClick = u; lastClickTime = Time.time;
+                SetSelected(new List<Unit> { u });
+                return;
+            }
+            lastClick = null;
             var b = hit.collider.GetComponentInParent<Building>();
             if (b != null && b.team == Team.Player) { SelectBuilding(b); return; }
             ClearAll();
@@ -71,6 +96,7 @@ namespace Eresoth
 
         void BoxSelect()
         {
+            lastClick = null;
             var rect = ScreenRect(downPos, Input.mousePosition);
             var list = new List<Unit>();
             foreach (var u in Game.I.units)
@@ -84,6 +110,7 @@ namespace Eresoth
 
         void Command()
         {
+            lastClick = null;
             if (!Raycast(out var hit)) return;
 
             // 选中建筑时：右键设置集结点
