@@ -34,8 +34,9 @@ namespace Eresoth
                     t += dt;
                     if (t >= GameConfig.GatherTime)
                     {
-                        node.amount -= GameConfig.GatherAmount;
-                        carry = GameConfig.GatherAmount;
+                        int amt = Game.I.GatherAmt(u.team);
+                        node.amount -= amt;
+                        carry = amt;
                         if (node.amount <= 0) { var dead = node; node = null; Destroy(dead.gameObject); }
                         state = State.Returning;
                     }

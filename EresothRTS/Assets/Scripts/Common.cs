@@ -43,7 +43,8 @@ namespace Eresoth
         }
     }
 
-    /// <summary>建筑静态数据：造价/HP/可训练兵种/可研究科技，全部数据驱动。</summary>
+    /// <summary>建筑静态数据：造价/HP/可训练兵种/可研究科技，全部数据驱动。
+    /// atkRange > 0 时为防御塔（自动攻击射程内敌人）。</summary>
     public class BuildingDef
     {
         public string kind, name;
@@ -51,12 +52,15 @@ namespace Eresoth
         public float hp, size;
         public UnitDef[] train;
         public string[] techs;
+        public float atk, atkRange, atkCd;   // 防御塔攻击参数（atkRange=0 表示无攻击力）
 
         public BuildingDef(string kind, string name, int wood, int mana, float hp, float size,
-            UnitDef[] train = null, string[] techs = null)
+            UnitDef[] train = null, string[] techs = null,
+            float atk = 0f, float atkRange = 0f, float atkCd = 0f)
         {
             this.kind = kind; this.name = name; this.wood = wood; this.mana = mana;
             this.hp = hp; this.size = size; this.train = train; this.techs = techs;
+            this.atk = atk; this.atkRange = atkRange; this.atkCd = atkCd;
         }
     }
 
@@ -121,15 +125,18 @@ namespace Eresoth
         };
 
         // ---- 建筑表：主基地 + 每类兵种一座专属兵营（科技在步兵兵营研究）----
+        // 伐木场：工人采集量 +50%（全场唯一）；箭塔：自动攻击的防御塔（可建多座）
         public static readonly BuildingDef Hall        = new("hall",        "主基地",   0,   0,   1500, 5.0f);
         public static readonly BuildingDef Barracks    = new("barracks",    "兵营",     150, 0,   800,  3.6f, new[] { Footman }, new[] { "human_atk", "human_def" });
         public static readonly BuildingDef Archery     = new("archery",     "弓箭场",   140, 20,  700,  3.2f, new[] { Archer });
         public static readonly BuildingDef Stable      = new("stable",      "马厩",     180, 40,  800,  3.6f, new[] { Knight });
+        public static readonly BuildingDef Lumber      = new("lumber",      "伐木场",   120, 0,   600,  3.0f);
+        public static readonly BuildingDef Tower       = new("tower",       "箭塔",     80,  0,   350,  2.6f, atk: 12, atkRange: 11, atkCd: 1f);
         public static readonly BuildingDef Crypt       = new("crypt",       "地穴",     150, 0,   800,  3.6f, new[] { Skeleton }, new[] { "undead_atk", "undead_def" });
         public static readonly BuildingDef DarkTemple  = new("dark_temple", "诅咒神殿", 140, 20,  700,  3.2f, new[] { DarkArcher });
         public static readonly BuildingDef DeathStable = new("death_stable","死亡马厩", 180, 40,  800,  3.6f, new[] { DeathKnight });
 
-        public static readonly BuildingDef[] HumanBuildings  = { Barracks, Archery, Stable };
-        public static readonly BuildingDef[] UndeadBuildings = { Crypt, DarkTemple, DeathStable };
+        public static readonly BuildingDef[] HumanBuildings  = { Barracks, Archery, Stable, Lumber, Tower };
+        public static readonly BuildingDef[] UndeadBuildings = { Crypt, DarkTemple, DeathStable, Lumber, Tower };
     }
 }

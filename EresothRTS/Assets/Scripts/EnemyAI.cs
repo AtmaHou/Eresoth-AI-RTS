@@ -50,6 +50,9 @@ namespace Eresoth
             else if (g.BuildingOfKind(Team.Enemy, "death_stable") == null
                 && g.wood[1] >= GameConfig.DeathStable.wood + 50)
                 g.BuildStructure(Team.Enemy, GameConfig.DeathStable);
+            else if (g.BuildingOfKind(Team.Enemy, "lumber") == null
+                && g.wood[1] >= GameConfig.Lumber.wood + 50)
+                g.BuildStructure(Team.Enemy, GameConfig.Lumber);   // 伐木场：采集 +50%
 
             // 4. 攀科技：木富余时轮流研究攻防（地穴，单研究槽）
             var crypt = g.BuildingOfKind(Team.Enemy, "crypt");

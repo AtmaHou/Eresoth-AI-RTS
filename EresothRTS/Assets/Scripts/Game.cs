@@ -33,6 +33,10 @@ namespace Eresoth
         {
             I = this;
             Application.targetFrameRate = 60;
+            // 相机在开局前就要存在，否则开始界面 "no game rendering" 报错
+            baseCenter[0] = new Vector3(-38, 0, -38); // 玩家：左下
+            baseCenter[1] = new Vector3( 38, 0,  38); // AI：右上
+            BuildCamera();
             gameObject.AddComponent<SelectionManager>();
             gameObject.AddComponent<EnemyAI>();
             gameObject.AddComponent<GameHUD>();
@@ -73,9 +77,6 @@ namespace Eresoth
             Gfx.Prim(PrimitiveType.Cube, null, new Vector3(0, 3, -68), new Vector3(150, 7, 6), rock).name = "Wall";
             Gfx.Prim(PrimitiveType.Cube, null, new Vector3( 68, 3, 0), new Vector3(6, 7, 150), rock).name = "Wall";
             Gfx.Prim(PrimitiveType.Cube, null, new Vector3(-68, 3, 0), new Vector3(6, 7, 150), rock).name = "Wall";
-
-            baseCenter[0] = new Vector3(-38, 0, -38); // 玩家：左下
-            baseCenter[1] = new Vector3( 38, 0,  38); // AI：右上
 
             // 地图种子与丰富度：随机模式每局不同，关闭则用固定种子可复现
             seed = MapSettings.randomMap ? Random.Range(1, int.MaxValue) : 20240901;
@@ -125,7 +126,6 @@ namespace Eresoth
 
             SpawnBase(Team.Player, GameConfig.Farmer);
             SpawnBase(Team.Enemy, GameConfig.Acolyte);
-            BuildCamera();
         }
 
         bool NearNode(Vector3 p, float dist)
@@ -179,6 +179,10 @@ namespace Eresoth
             if (kind == "wood") wood[(int)team] += amount; else mana[(int)team] += amount;
         }
 
+        /// <summary>工人单次采集量；建有伐木场时 +50%。</summary>
+        public int GatherAmt(Team team)
+            => Mathf.RoundToInt(GameConfig.GatherAmount * (BuildingOfKind(team, "lumber") != null ? 1.5f : 1f));
+
         public int PopCount(int team)
         {
             int c = 0;
@@ -199,7 +203,10 @@ namespace Eresoth
             if (team == Team.Player) Toast($"研究完成：{t.name} Lv{TechLevel(team, t.effect)}");
         }
 
-        // ---------------- 建造（固定槽位，不做选点放置） ----------------
+        // ---------------- 建造（AI 用固定槽位；玩家自由选址） ----------------
+
+        public const float BuildRadius = 32f;   // 玩家建筑需距己方主基地此范围内
+        public const int TowerCap = 8;          // 箭塔建造上限（其他建筑全场唯一）
 
         static readonly Vector3[] BuildSlots =
         {
@@ -207,6 +214,7 @@ namespace Eresoth
             new Vector3(0, 0, 11), new Vector3(0, 0, -11), new Vector3(13, 0, 0), new Vector3(-13, 0, 0),
         };
 
+        /// <summary>AI 建建筑：固定槽位、同 kind 全场一座。</summary>
         public bool BuildStructure(Team team, BuildingDef def)
         {
             if (BuildingOfKind(team, def.kind) != null)
@@ -227,6 +235,39 @@ namespace Eresoth
             }
             if (team == Team.Player) Toast("基地周围没有空地");
             return false;
+        }
+
+        /// <summary>校验玩家自由选址：地图边界、主基地半径、与其他建筑/资源点不重叠。err 为失败原因。</summary>
+        public bool CanPlaceAt(Team team, BuildingDef def, Vector3 p, out string err)
+        {
+            err = null;
+            if (Mathf.Abs(p.x) > 58f || Mathf.Abs(p.z) > 58f) { err = "超出地图边界"; return false; }
+            var hall = Hall(team);
+            if (hall == null || Vector3.Distance(p, hall.transform.position) > BuildRadius)
+            { err = $"需在主基地 {BuildRadius:0} 格范围内"; return false; }
+            foreach (var b in buildings)
+                if (Vector3.Distance(p, b.transform.position) < b.radius + def.size * 0.8f + 1f)
+                { err = "与其他建筑重叠"; return false; }
+            if (NearNode(p, 3f)) { err = "离资源点太近"; return false; }
+            return true;
+        }
+
+        /// <summary>玩家在指定位置建建筑：非箭塔同 kind 全场唯一，箭塔有数量上限。</summary>
+        public bool BuildAt(Team team, BuildingDef def, Vector3 p)
+        {
+            if (def.kind == "tower")
+            {
+                int towers = buildings.FindAll(b => b.team == team && b.kind == "tower").Count;
+                if (towers >= TowerCap) { if (team == Team.Player) Toast($"箭塔最多 {TowerCap} 座"); return false; }
+            }
+            else if (BuildingOfKind(team, def.kind) != null)
+            { if (team == Team.Player) Toast($"{def.name}已建成"); return false; }
+
+            if (!CanPlaceAt(team, def, p, out string err))
+            { if (team == Team.Player) Toast(err); return false; }
+            if (!TrySpend((int)team, def.wood, def.mana)) return false;
+            Building.Spawn(team, def, p);
+            return true;
         }
 
         // ---------------- 查询 ----------------

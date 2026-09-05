@@ -11,6 +11,10 @@ namespace Eresoth
         public Building selBuilding;
         public bool dragging;
 
+        public BuildingDef placing;     // 建造放置模式（非 null 时左键选点）
+        GameObject ghost;               // 放置预览
+        readonly Dictionary<int, List<Unit>> groups = new();  // Ctrl+数字 编队
+
         Vector3 downPos;
         Camera cam;
 
@@ -21,6 +25,25 @@ namespace Eresoth
             if (!Game.I.started || Game.I.over) return;
             if (cam == null) cam = Camera.main;   // 世界在开局确认后才生成，相机随之出现
             selected.RemoveAll(u => u == null);
+
+            // 建造放置模式：拦截一切选择/指挥输入
+            if (placing != null) { PlacementStep(); return; }
+
+            // 编队：Ctrl+数字 设置，数字 召回
+            for (int i = 0; i <= 9; i++)
+            {
+                if (!Input.GetKeyDown(KeyCode.Alpha0 + i)) continue;
+                if (Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.RightControl))
+                {
+                    groups[i] = new List<Unit>(selected);
+                    if (selected.Count > 0) Game.I.Toast($"编队 {i}：{selected.Count} 单位");
+                }
+                else if (groups.TryGetValue(i, out var list))
+                {
+                    list.RemoveAll(u => u == null);
+                    if (list.Count > 0) SetSelected(list);
+                }
+            }
 
             if (Input.GetMouseButtonDown(0)) { downPos = Input.mousePosition; dragging = false; }
             if (Input.GetMouseButton(0) && (Input.mousePosition - downPos).magnitude > 10f) dragging = true;
@@ -104,6 +127,44 @@ namespace Eresoth
         {
             var ray = cam.ScreenPointToRay(Input.mousePosition);
             return Physics.Raycast(ray, out hit, 500f);
+        }
+
+        // ---------- 建造放置模式 ----------
+
+        /// <summary>进入放置模式：显示预览体，左键确认、右键/Esc 取消。</summary>
+        public void BeginPlacement(BuildingDef def)
+        {
+            CancelPlacement();
+            placing = def;
+            ghost = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            UnityEngine.Object.Destroy(ghost.GetComponent<Collider>());
+            ghost.name = "放置预览-" + def.name;
+        }
+
+        public void CancelPlacement()
+        {
+            if (ghost != null) Destroy(ghost);
+            ghost = null; placing = null;
+        }
+
+        void PlacementStep()
+        {
+            var ray = cam.ScreenPointToRay(Input.mousePosition);
+            if (!Physics.Raycast(ray, out var hit, 500f)) return;
+            Vector3 p = hit.point; p.y = 0;
+
+            bool valid = Game.I.CanPlaceAt(Team.Player, placing, p, out _);
+            ghost.transform.position = p + Vector3.up * placing.size * 0.4f;
+            ghost.transform.localScale = new Vector3(placing.size, placing.size * 0.8f, placing.size);
+            ghost.GetComponent<Renderer>().sharedMaterial =
+                Gfx.Mat(valid ? new Color(.2f, 1f, .4f) : new Color(1f, .3f, .3f));
+
+            if (Input.GetKeyDown(KeyCode.Escape)
+                || Input.GetMouseButtonDown(1)) CancelPlacement();
+            else if (valid && Input.GetMouseButtonDown(0) && Input.mousePosition.y > 120)
+            {
+                if (Game.I.BuildAt(Team.Player, placing, p)) CancelPlacement();
+            }
         }
 
         // ---------- 选择状态 ----------

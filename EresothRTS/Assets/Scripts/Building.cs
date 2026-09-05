@@ -16,12 +16,14 @@ namespace Eresoth
         public string research;      // 当前研究中的科技 id，null = 空闲
         public float researchTimer;
         float timer;
+        float towerCd;               // 防御塔攻击冷却
 
         public string kind => def.kind;
 
         public static Building Spawn(Team team, BuildingDef def, Vector3 pos)
         {
             bool hall = def.kind == "hall";
+            bool tower = def.atkRange > 0;   // 防御塔：高瘦造型
             var root = new GameObject(def.name);
             root.transform.position = pos;
 
@@ -30,14 +32,28 @@ namespace Eresoth
                 : (hall ? new Color(.35f, .25f, .45f) : new Color(.30f, .28f, .35f));
             Color top = team == Team.Player ? new Color(.95f, .80f, .35f) : new Color(.50f, .90f, .80f);
 
-            Gfx.Prim(PrimitiveType.Cube, root.transform, new Vector3(0, def.size * 0.4f, 0),
-                     new Vector3(def.size, def.size * 0.8f, def.size), body);
-            Gfx.Prim(PrimitiveType.Cube, root.transform, new Vector3(0, def.size * 0.8f + def.size * 0.14f, 0),
-                     new Vector3(def.size * 0.4f, def.size * 0.28f, def.size * 0.4f), top);
+            if (tower)
+            {
+                Gfx.Prim(PrimitiveType.Cube, root.transform, new Vector3(0, def.size * 0.6f, 0),
+                         new Vector3(def.size * 0.7f, def.size * 1.2f, def.size * 0.7f), body);
+                Gfx.Prim(PrimitiveType.Cube, root.transform, new Vector3(0, def.size * 1.2f + def.size * 0.14f, 0),
+                         new Vector3(def.size * 0.55f, def.size * 0.28f, def.size * 0.55f), top);
 
-            var col = root.AddComponent<BoxCollider>();
-            col.center = new Vector3(0, def.size * 0.4f, 0);
-            col.size = new Vector3(def.size, def.size * 0.8f, def.size);
+                var tCol = root.AddComponent<BoxCollider>();
+                tCol.center = new Vector3(0, def.size * 0.6f, 0);
+                tCol.size = new Vector3(def.size * 0.7f, def.size * 1.2f, def.size * 0.7f);
+            }
+            else
+            {
+                Gfx.Prim(PrimitiveType.Cube, root.transform, new Vector3(0, def.size * 0.4f, 0),
+                         new Vector3(def.size, def.size * 0.8f, def.size), body);
+                Gfx.Prim(PrimitiveType.Cube, root.transform, new Vector3(0, def.size * 0.8f + def.size * 0.14f, 0),
+                         new Vector3(def.size * 0.4f, def.size * 0.28f, def.size * 0.4f), top);
+
+                var col = root.AddComponent<BoxCollider>();
+                col.center = new Vector3(0, def.size * 0.4f, 0);
+                col.size = new Vector3(def.size, def.size * 0.8f, def.size);
+            }
 
             var b = root.AddComponent<Building>();
             b.team = team; b.def = def;
@@ -83,6 +99,27 @@ namespace Eresoth
                     research = null;
                     researchTimer = 0;
                     Game.I.FinishResearch(team, done);
+                }
+            }
+
+            // 防御塔：自动攻击射程内最近的敌方单位
+            if (def.atkRange > 0)
+            {
+                towerCd -= dt;
+                if (towerCd <= 0)
+                {
+                    Unit best = null; float bd = def.atkRange;
+                    foreach (var u in Game.I.units)
+                    {
+                        if (u.team == team) continue;
+                        float d = Vector3.Distance(transform.position, u.transform.position);
+                        if (d < bd) { bd = d; best = u; }
+                    }
+                    if (best != null)
+                    {
+                        towerCd = def.atkCd;
+                        best.Damage(def.atk * Game.I.AtkMult((int)team));
+                    }
                 }
             }
         }

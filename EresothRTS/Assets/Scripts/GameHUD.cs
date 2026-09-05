@@ -47,6 +47,15 @@ namespace Eresoth
                 GUI.color = Color.white;
             }
 
+            // 建造放置模式提示
+            if (sel.placing != null)
+            {
+                GUI.color = new Color(.4f, 1f, .6f);
+                GUI.Label(new Rect(Screen.width / 2f - 250, 66, 500, 26),
+                    $"放置 {sel.placing.name}：左键确认 | 右键 / Esc 取消（绿=可建 红=不可建）", mid);
+                GUI.color = Color.white;
+            }
+
             // 底部操作面板
             GUI.Box(new Rect(0, Screen.height - 120, Screen.width, 120), GUIContent.none);
             DrawBottom();
@@ -97,7 +106,7 @@ namespace Eresoth
 
                 if (b.kind == "hall")
                 {
-                    // 训练工人 + 建造列表（按种族建筑表，已建置灰）
+                    // 训练工人 + 建造列表（点击后进入自由选址放置模式；同 kind 唯一，箭塔显示数量）
                     var workerDef = b.team == Team.Player ? GameConfig.Farmer : GameConfig.Acolyte;
                     Btn(new Rect(16, y + 30, 160, 30), $"训练{workerDef.name} ({workerDef.wood}木)",
                         () => b.TryTrain(workerDef), g.wood[0] >= workerDef.wood);
@@ -106,13 +115,17 @@ namespace Eresoth
                     for (int i = 0; i < list.Length; i++)
                     {
                         var bd = list[i];
-                        bool built = g.BuildingOfKind(b.team, bd.kind) != null;
+                        bool unique = bd.kind != "tower";   // 箭塔可建多座
+                        int towers = g.buildings.FindAll(x => x.team == b.team && x.kind == "tower").Count;
+                        bool built = unique && g.BuildingOfKind(b.team, bd.kind) != null;
                         string cost = bd.mana > 0 ? $"{bd.wood}木+{bd.mana}矿" : $"{bd.wood}木";
                         bool afford = g.wood[0] >= bd.wood && g.mana[0] >= bd.mana;
+                        string label = bd.kind == "tower" ? $"建造{bd.name}({towers}/{Game.TowerCap})"
+                            : built ? $"{bd.name}已建成" : $"建造{bd.name}({cost})";
+                        bool canDo = bd.kind == "tower" ? towers < Game.TowerCap && afford : !built && afford;
                         var def = bd;
-                        Btn(new Rect(190 + i * 180, y + 30, 170, 30),
-                            built ? $"{bd.name}已建成" : $"建造{bd.name}({cost})",
-                            () => g.BuildStructure(b.team, def), !built && afford);
+                        Btn(new Rect(190 + i * 180, y + 30, 170, 30), label,
+                            () => sel.BeginPlacement(def), canDo);
                     }
                 }
                 else
@@ -170,12 +183,13 @@ namespace Eresoth
                 foreach (var kv in cnt) sb.Append($"{kv.Key}×{kv.Value}  ");
                 GUI.Label(new Rect(16, y, 900, 24), $"已选 {sel.selected.Count} 单位：{sb}", mid);
                 GUI.Label(new Rect(16, y + 30, 900, 24),
-                    "右键点地=移动 | 点敌人=攻击 | 农夫点树/水晶=采集", mid);
+                    "右键点地=移动 | 点敌人=攻击 | 农夫点树/水晶=采集 | Ctrl+数字=编队，数字=召回", mid);
             }
             else
             {
                 GUI.Label(new Rect(16, y, 900, 24),
-                    "目标：摧毁右上角不死族主基地！主基地训练农夫，兵营/弓箭场/马厩各出一种兵：步兵克骑兵、远程克步兵、骑兵快克远程（伤害+50%）。", mid);
+                    "目标：摧毁右上角不死族主基地！兵营/弓箭场/马厩各出一种兵（步克骑、弓克步、骑克弓+50%伤害），" +
+                    "伐木场提升采集50%，箭塔自动防御，Ctrl+数字编队。", mid);
             }
         }
 
