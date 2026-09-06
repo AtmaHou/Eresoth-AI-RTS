@@ -18,10 +18,10 @@ namespace Eresoth
 
         public static Material Mat(Color c) => Mat(c, 0f, 0.35f, false);
 
-        /// <summary>带 PBR 参数的材质。metallic 0..1，smooth 0..1，emissive 让颜色自发光。</summary>
-        public static Material Mat(Color c, float metallic, float smooth, bool emissive = false)
+        /// <summary>带 PBR 参数的材质。metallic 0..1，smooth 0..1，emissive 让颜色自发光，emisMul 控制发光强度。</summary>
+        public static Material Mat(Color c, float metallic, float smooth, bool emissive = false, float emisMul = 1.5f)
         {
-            long key = Hash(c, metallic, smooth, emissive);
+            long key = Hash(c, metallic, smooth, emissive, emisMul);
             if (cache.TryGetValue(key, out var m) && m != null) return m;
             bool urp = GraphicsSettings.currentRenderPipeline != null;
             var shader = Shader.Find(urp ? "Universal Render Pipeline/Lit" : "Standard");
@@ -34,7 +34,7 @@ namespace Eresoth
                 if (emissive)
                 {
                     mat.EnableKeyword("_EMISSION");
-                    mat.SetColor("_EmissionColor", c * 1.5f);
+                    mat.SetColor("_EmissionColor", c * emisMul);
                 }
             }
             else
@@ -45,19 +45,20 @@ namespace Eresoth
                 if (emissive)
                 {
                     mat.EnableKeyword("_EMISSION");
-                    mat.SetColor("_EmissionColor", c * 1.5f);
+                    mat.SetColor("_EmissionColor", c * emisMul);
                 }
             }
             cache[key] = mat;
             return mat;
         }
 
-        static long Hash(Color c, float m, float s, bool e)
+        static long Hash(Color c, float m, float s, bool e, float em)
         {
             int r = Mathf.RoundToInt(c.r * 255), g = Mathf.RoundToInt(c.g * 255),
                 b = Mathf.RoundToInt(c.b * 255), a = Mathf.RoundToInt(c.a * 255);
             long h = ((long)(uint)r << 40) | ((long)(uint)g << 32) | ((long)(uint)b << 24) | ((long)(uint)a << 16)
                    | ((long)(uint)Mathf.RoundToInt(m * 100) << 8) | (uint)Mathf.RoundToInt(s * 100);
+            h ^= ((long)Mathf.RoundToInt(em * 20)) << 1;
             return e ? h | 1 : h & ~1L;
         }
 
@@ -72,7 +73,7 @@ namespace Eresoth
         }
 
         public static GameObject Prim(PrimitiveType type, Transform parent, Vector3 pos, Vector3 scale, Color c,
-                                      float metallic, float smooth, bool emissive = false)
+                                      float metallic, float smooth, bool emissive = false, float emisMul = 1.5f)
         {
             var go = GameObject.CreatePrimitive(type);
             var col = go.GetComponent<Collider>();
@@ -80,20 +81,21 @@ namespace Eresoth
             if (parent != null) { go.transform.SetParent(parent, false); go.transform.localPosition = pos; }
             else go.transform.position = pos;
             go.transform.localScale = scale;
-            go.GetComponent<Renderer>().sharedMaterial = Mat(c, metallic, smooth, emissive);
+            go.GetComponent<Renderer>().sharedMaterial = Mat(c, metallic, smooth, emissive, emisMul);
             return go;
         }
 
         /// <summary>创建自定义网格物体。</summary>
         public static GameObject MeshGo(Mesh mesh, Transform parent, Vector3 pos, Vector3 scale, Color c,
-                                        float metallic = 0f, float smooth = 0.35f, bool emissive = false)
+                                        float metallic = 0f, float smooth = 0.35f, bool emissive = false,
+                                        float emisMul = 1.5f)
         {
             var go = new GameObject("mesh");
             if (parent != null) { go.transform.SetParent(parent, false); go.transform.localPosition = pos; }
             else go.transform.position = pos;
             go.transform.localScale = scale;
             go.AddComponent<MeshFilter>().sharedMesh = mesh;
-            go.AddComponent<MeshRenderer>().sharedMaterial = Mat(c, metallic, smooth, emissive);
+            go.AddComponent<MeshRenderer>().sharedMaterial = Mat(c, metallic, smooth, emissive, emisMul);
             return go;
         }
 
@@ -192,6 +194,27 @@ namespace Eresoth
             };
             var tri = new[] { 0, 2, 1, 0, 3, 2 };
             return CacheMesh(key, v, tri);
+        }
+
+        /// <summary>XZ 平面环形网格（内外半径，n 段），用于选中环/符文光环/法阵。</summary>
+        public static Mesh RingMesh(float inner = .42f, float outer = .5f, int n = 24)
+        {
+            string key = $"ring_{inner}_{outer}_{n}";
+            if (meshCache.TryGetValue(key, out var cached) && cached != null) return cached;
+            var v = new List<Vector3>();
+            var tri = new List<int>();
+            for (int i = 0; i <= n; i++)
+            {
+                float a = i * Mathf.PI * 2 / n;
+                v.Add(new Vector3(Mathf.Cos(a) * outer, 0, Mathf.Sin(a) * outer));
+                v.Add(new Vector3(Mathf.Cos(a) * inner, 0, Mathf.Sin(a) * inner));
+                if (i < n)
+                {
+                    int b = i * 2;
+                    tri.AddRange(new[] { b, b + 2, b + 1, b + 1, b + 2, b + 3 });
+                }
+            }
+            return CacheMesh(key, v.ToArray(), tri.ToArray());
         }
 
         /// <summary>菱形晶体（双锥，底半径 .5，高 1）。</summary>

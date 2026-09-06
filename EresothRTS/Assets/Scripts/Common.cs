@@ -133,7 +133,7 @@ namespace Eresoth
         // ---- 英雄（全场唯一，兵营训练）：数值强化 + 攻击光环 + AOE 溅射 ----
         public static readonly UnitDef LordKnight = new("lordknight", "骑士团长", UnitKind.Cavalry, 650, 34, 2.2f, 7.5f, 1.2f, 10, 1.50f,
             300, 150, 3, false, new Color(1f, .92f, .45f), hero: true, auraRadius: 10f, auraBonus: 0.25f, aoeRadius: 3f);
-        public static readonly UnitDef DeathRanger = new("deathranger", "死亡游侠", UnitKind.Ranged, 520, 30, 10f, 5.5f, 1.1f, 11, 1.10f,
+        public static readonly UnitDef DeathRanger = new("deathranger", "霜骨巫妖", UnitKind.Ranged, 520, 30, 10f, 5.5f, 1.1f, 11, 1.10f,
             300, 150, 3, false, new Color(.85f, .55f, 1f), hero: true, auraRadius: 10f, auraBonus: 0.25f, aoeRadius: 2.5f);
 
         // ---- 第一层科技：兵种攻防强化（每级 +15%，造价 = 基础 × 等级）----

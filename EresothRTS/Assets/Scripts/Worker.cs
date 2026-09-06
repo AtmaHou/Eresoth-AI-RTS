@@ -38,6 +38,7 @@ namespace Eresoth
                         int amt = Game.I.GatherAmt(u.team);
                         node.amount -= amt;
                         carry = amt;
+                        UnitVfx.PlayGatherEffect(u, curKind);   // 采集反馈（纯视觉，不改数值）
                         if (node.amount <= 0) { var dead = node; node = null; Destroy(dead.gameObject); }
                         state = State.Returning;
                     }

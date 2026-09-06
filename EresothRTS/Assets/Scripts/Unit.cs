@@ -24,6 +24,10 @@ namespace Eresoth
         float steerSide = 1f;               // 绕行方向 ±1
         Transform visual;                   // 视觉子物体（摆动动画只作用于此层，不影响逻辑朝向）
         BodyRig rig;                        // 动画挂点
+        float vfxStepT;                     // 脚步特效节流
+
+        /// <summary>动画挂点只读访问（特效/展示工具用；只允许视觉层读取）。</summary>
+        public BodyRig Rig => rig;
 
         public static Unit Spawn(Team team, UnitDef def, Vector3 pos)
         {
@@ -68,24 +72,7 @@ namespace Eresoth
             go.transform.SetParent(parent, false);
             go.transform.localPosition = new Vector3(0, .04f, 0);
             go.transform.localScale = Vector3.one * size * 1.4f;
-            const int n = 24;
-            var verts = new Vector3[n * 2 + 2];
-            var tris = new int[n * 6];
-            for (int i = 0; i <= n; i++)
-            {
-                float a = i * Mathf.PI * 2 / n;
-                verts[i * 2] = new Vector3(Mathf.Cos(a) * .5f, 0, Mathf.Sin(a) * .5f);
-                verts[i * 2 + 1] = new Vector3(Mathf.Cos(a) * .42f, 0, Mathf.Sin(a) * .42f);
-                if (i < n)
-                {
-                    int b = i * 2;
-                    tris[i * 6] = b; tris[i * 6 + 1] = b + 2; tris[i * 6 + 2] = b + 1;
-                    tris[i * 6 + 3] = b + 1; tris[i * 6 + 4] = b + 2; tris[i * 6 + 5] = b + 3;
-                }
-            }
-            var mesh = new Mesh { name = "ring", vertices = verts, triangles = tris };
-            mesh.RecalculateNormals();
-            var mf = go.AddComponent<MeshFilter>(); mf.sharedMesh = mesh;
+            var mf = go.AddComponent<MeshFilter>(); mf.sharedMesh = Gfx.RingMesh(.42f, .5f, 24);
             var mr = go.AddComponent<MeshRenderer>();
             mr.sharedMaterial = Gfx.Mat(c, 0f, .45f, true);
             go.SetActive(false);
@@ -164,11 +151,17 @@ namespace Eresoth
                     {
                         cd = def.cooldown;
                         atkAnim = 1f;
+                        UnitVfx.PlayAttackStartEffect(this);   // 出手前摇提示（纯视觉）
                         bool ranged = def.range > 3f;
                         float dmg = def.dmg * CounterMult(target) * Game.I.AtkMult((int)team) * Game.I.AuraDmgMult(team, transform.position);
                         if (ranged)
-                            Game.I.SpawnProjectile(team, transform.position + Vector3.up * def.size * 1.5f,
-                                                   target, dmg, def.aoeRadius, this);
+                        {
+                            // 弹道起点优先取武器挂点（弓口/法杖晶体），视觉更准确；不影响命中结算
+                            Vector3 from = rig != null && rig.projectileOrigin != null
+                                ? rig.projectileOrigin.position
+                                : transform.position + Vector3.up * def.size * 1.5f;
+                            Game.I.SpawnProjectile(team, from, target, dmg, def.aoeRadius, this);
+                        }
                         else
                         {
                             target.Damage(dmg);
@@ -308,6 +301,14 @@ namespace Eresoth
         void Anim(float moveBlend, float dt)
         {
             if (rig == null) return;
+
+            // 移动脚步特效（仅 High 档，节流防堆积；纯视觉）
+            if (moveBlend > 0 && UnitVfx.quality == VfxQuality.High)
+            {
+                vfxStepT -= dt;
+                if (vfxStepT <= 0f) { vfxStepT = .45f; UnitVfx.PlayMoveEffect(this); }
+            }
+            else if (moveBlend <= 0f) vfxStepT = 0f;
             if (moveBlend > 0)
                 walkPhase += dt * def.speed * 1.6f;
             else
@@ -341,8 +342,49 @@ namespace Eresoth
             {
                 atkAnim = Mathf.Max(0, atkAnim - dt * 5);
                 float k = Mathf.Sin(atkAnim * Mathf.PI);
-                if (rig.armR != null) rig.armR.localRotation = Quaternion.Euler(-90 * k, 0, 0);
+                if (rig.armR != null)
+                {
+                    if (rig.thrustAttack)
+                    {
+                        // 枪盾短刺：沿 +Z 突刺后收枪复位（位移基于基准快照，不漂移）
+                        var hp = rig.armRHome;
+                        hp.z += .35f * def.size * k;
+                        rig.armR.localPosition = hp;
+                        rig.armR.localRotation = Quaternion.Euler(-25 * k, 0, 0);
+                    }
+                    else rig.armR.localRotation = Quaternion.Euler(-90 * k, 0, 0);
+                }
             }
+            else if (rig.thrustAttack && rig.armR != null)
+            {
+                rig.armR.localPosition = rig.armRHome;   // 回到盾后防守姿态
+            }
+
+            // 扩展挂点动画（全部 null 安全；旋转/缩放用增量或快照基准，不产生累积漂移）
+            float t = Time.time;
+            if (rig.capePieces != null)
+                for (int i = 0; i < rig.capePieces.Length; i++)
+                {
+                    var cp = rig.capePieces[i];
+                    if (cp == null) continue;
+                    cp.localRotation = Quaternion.Euler(
+                        10 + Mathf.Sin(t * 1.8f + i * 1.1f) * (4f + 7f * moveBlend), 0, cp.localEulerAngles.z);
+                }
+            if (rig.soulCore != null)
+            {
+                rig.soulCore.Rotate(0, dt * 40f, 0, Space.Self);
+                rig.soulCore.localScale = rig.soulCoreBase * (1f + .08f * Mathf.Sin(t * 2.5f));
+            }
+            if (rig.floatingParts != null && rig.floatBase != null)
+                for (int i = 0; i < rig.floatingParts.Length && i < rig.floatBase.Length; i++)
+                {
+                    var fp = rig.floatingParts[i];
+                    if (fp == null) continue;
+                    fp.localPosition = rig.floatBase[i]
+                        + new Vector3(0, Mathf.Sin(t * 1.2f + i * 1.7f) * .04f * def.size, 0);
+                    fp.Rotate(0, dt * (18f + i * 6f), 0, Space.Self);
+                }
+            if (rig.auraOrigin != null) rig.auraOrigin.Rotate(0, dt * 30f, 0, Space.Self);
         }
 
         // ---------- ITargetable ----------
@@ -357,7 +399,13 @@ namespace Eresoth
         public void Damage(float dmg)
         {
             hp -= dmg * Game.I.DefMult((int)team);
-            if (hp <= 0) { hp = 0; Destroy(gameObject); }
+            if (hp <= 0)
+            {
+                hp = 0;
+                UnitVfx.PlayDeathEffect(this);         // 死亡反馈（纯视觉）
+                Destroy(gameObject);
+            }
+            else UnitVfx.PlayHitEffect(this);          // 受击/格挡反馈（纯视觉）
         }
     }
 }
