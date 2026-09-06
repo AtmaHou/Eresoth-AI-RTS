@@ -36,7 +36,7 @@ namespace Eresoth
             string faction = g.playerTeam == Team.Player ? "人类" : "不死族";
             GUI.Box(new Rect(0, 0, Screen.width, 26), GUIContent.none);
             GUI.Label(new Rect(12, 3, 760, 22),
-                $"【{faction}】木头 {g.wood[pi]}    魔法矿 {g.mana[pi]}    人口 {g.PopCount(pi)}/{g.PopCap(g.playerTeam)}" +
+                $"【{faction}】魔法矿 {g.mana[pi]}    木头 {g.wood[pi]}    人口 {g.PopCount(pi)}/{g.PopCap(g.playerTeam)}" +
                 $"    攻+{g.atkLevel[pi] * 15}%  防+{g.defLevel[pi] * 15}%    种子 {g.seed}", mid);
             GUI.Label(new Rect(Screen.width - 430, 3, 420, 22),
                 "左键框选 | 右键移动/攻击/采集 | WASD滚屏 | 滚轮缩放", mid);
@@ -74,7 +74,7 @@ namespace Eresoth
             GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), Texture2D.whiteTexture);
             GUI.color = Color.white;
 
-            float w = 480, h = 280;
+            float w = 520, h = 420;
             var r = new Rect((Screen.width - w) / 2f, (Screen.height - h) / 2f, w, h);
             GUI.Box(r, GUIContent.none);
             GUI.Label(new Rect(r.x, r.y + 16, r.width, 40), "厄瑞索斯 RTS", big);
@@ -95,14 +95,34 @@ namespace Eresoth
             GUI.Label(new Rect(r.x + 235, r.y + 122, 220, 24),
                 MapSettings.randomMap ? "每局不同布局" : "固定种子可复现", mid);
 
-            // 资源丰富度：影响树木与魔法矿数量
+            // 地图大小
             Btn(new Rect(r.x + 50, r.y + 164, 170, 32),
+                $"地图：{MapSettings.MapSizeNames[MapSettings.mapSizeIndex]}",
+                () => MapSettings.mapSizeIndex = (MapSettings.mapSizeIndex + 1) % MapSettings.MapSizeNames.Length, true);
+            GUI.Label(new Rect(r.x + 235, r.y + 168, 220, 24),
+                $"地图边长 {MapSettings.WorldSize:0}", mid);
+
+            // 资源丰富度：影响树木与魔法矿数量
+            Btn(new Rect(r.x + 50, r.y + 210, 170, 32),
                 $"资源：{MapSettings.RichnessNames[MapSettings.richnessIndex]}",
                 () => MapSettings.richnessIndex = (MapSettings.richnessIndex + 1) % 3, true);
-            GUI.Label(new Rect(r.x + 235, r.y + 168, 220, 24),
-                $"树木/矿点 ×{MapSettings.Richness}", mid);
+            GUI.Label(new Rect(r.x + 235, r.y + 214, 220, 24),
+                $"魔法矿/树木 ×{MapSettings.Richness}", mid);
 
-            Btn(new Rect(r.x + 140, r.y + 218, 200, 42), "开 始 游 戏", () => g.StartGame(), true);
+            // 胜利条件
+            Btn(new Rect(r.x + 50, r.y + 256, 170, 32),
+                $"胜利：{MapSettings.VictoryNames[(int)MapSettings.victoryMode]}",
+                () => MapSettings.victoryMode = MapSettings.victoryMode == VictoryMode.MainBase
+                    ? VictoryMode.AllBuildings : VictoryMode.MainBase, true);
+            GUI.Label(new Rect(r.x + 235, r.y + 260, 220, 24), "选择本局结束条件", mid);
+
+            Btn(new Rect(r.x + 50, r.y + 302, 170, 32),
+                $"难度：{MapSettings.DifficultyNames[(int)MapSettings.difficulty]}",
+                () => MapSettings.difficulty = (Difficulty)(((int)MapSettings.difficulty + 1) % MapSettings.DifficultyNames.Length), true);
+            GUI.Label(new Rect(r.x + 235, r.y + 306, 240, 24),
+                MapSettings.difficulty == Difficulty.Hard ? "AI 经济加成 +35%" : "AI 标准经济与压力", mid);
+
+            Btn(new Rect(r.x + 140, r.y + 360, 200, 42), "开 始 游 戏", () => g.StartGame(), true);
         }
 
         void DrawBottom()
@@ -115,13 +135,23 @@ namespace Eresoth
                 var b = sel.selBuilding;
                 GUI.Label(new Rect(16, y, 500, 24), $"{b.DisplayName}  HP {b.hp:0}/{b.def.hp:0}", mid);
 
+                if (b.constructing)
+                {
+                    GUI.color = new Color(.6f, .9f, 1f);
+                    GUI.Label(new Rect(16, y + 30, 520, 30),
+                        $"施工中 {b.constructionProgress * 100f:0}%  | 工人会自动参与建造 | 施工中受到双倍伤害", mid);
+                    GUI.color = Color.white;
+                    return;
+                }
+
                 if (b.kind == "hall")
                 {
-                    // 训练工人 + 建造列表（点击后进入自由选址放置模式；同 kind 唯一，箭塔显示数量）
+                    // 训练工人 + 建造列表（点击后进入自由选址放置模式；由工人施工）
                     int bi = (int)b.team;
                     var workerDef = b.team == Team.Player ? GameConfig.Farmer : GameConfig.Acolyte;
-                    Btn(new Rect(16, y + 30, 160, 30), $"训练{workerDef.name} ({workerDef.wood}木)",
-                        () => b.TryTrain(workerDef), g.wood[bi] >= workerDef.wood);
+                    string workerCost = workerDef.mana > 0 ? $"{workerDef.wood}木+{workerDef.mana}矿" : $"{workerDef.wood}木";
+                    Btn(new Rect(16, y + 30, 160, 30), $"训练{workerDef.name} ({workerCost})",
+                        () => b.TryTrain(workerDef), g.wood[bi] >= workerDef.wood && g.mana[bi] >= workerDef.mana);
 
                     var list = b.team == Team.Player ? GameConfig.HumanBuildings : GameConfig.UndeadBuildings;
                     for (int i = 0; i < list.Length; i++)
@@ -205,8 +235,7 @@ namespace Eresoth
             else
             {
                 GUI.Label(new Rect(16, y, 1100, 24),
-                    "目标：摧毁敌方主基地！兵营/弓箭场/马厩各出一种兵（步克骑、弓克步、骑克弓+50%伤害），兵营可训练英雄（光环+AOE★），" +
-                    "伐木场采集+50%，箭塔自动防御，Ctrl+数字编队，双击选同类。", mid);
+                    $"目标：{MapSettings.VictoryNames[(int)MapSettings.victoryMode]}！魔法矿是主要资源；资源收集站可作为远端交付点，建筑由工人施工。", mid);
             }
         }
 
@@ -250,7 +279,7 @@ namespace Eresoth
             GUI.Box(r, GUIContent.none);
             GUI.color = g.winner == 0 ? new Color(.5f, 1f, .6f) : new Color(1f, .5f, .5f);
             GUI.Label(new Rect(r.x, r.y + 30, r.width, 40),
-                g.winner == 0 ? "胜利！敌方主基地已被摧毁" : "战败……你的主基地陷落了", big);
+                g.winner == 0 ? $"胜利！{MapSettings.VictoryNames[(int)MapSettings.victoryMode]}" : "战败……你的建筑已全部失守", big);
             GUI.color = Color.white;
 
             if (GUI.Button(new Rect(r.x + 175, r.y + 105, 150, 40), "再来一局"))

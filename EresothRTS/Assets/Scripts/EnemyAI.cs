@@ -10,6 +10,7 @@ namespace Eresoth
     {
         float t;
         int wave;
+        float assaultCooldown;
 
         // AI 阵营 = 玩家的对手方；其兵种/建筑按该阵营种族取对应定义
         static Team Ai => Game.I.playerTeam == Team.Player ? Team.Enemy : Team.Player;
@@ -21,6 +22,7 @@ namespace Eresoth
             var g = Game.I;
             if (g.over) return;
             t -= Time.deltaTime;
+            assaultCooldown -= Time.deltaTime;
             if (t > 0) return;
             t = 2f; // 每 2 秒一轮决策
 
@@ -46,16 +48,16 @@ namespace Eresoth
             var atkTech = humanSide ? "human_atk" : "undead_atk";
             var defTech = humanSide ? "human_def" : "undead_def";
 
-            // 1. 采集分配：空闲工人去伐木，缺矿时派 2 个采水晶
+            // 1. 采集分配：魔法矿是主经济，木材只保留少量工人采集
             var workers = g.units.FindAll(u => IsAi(u) && u.def.worker);
-            bool needMana = g.mana[aiIdx] < 40;
+            bool needMana = g.mana[aiIdx] < 260;
             int toMana = 0;
             foreach (var w in workers)
             {
                 var wk = w.GetComponent<Worker>();
                 if (wk.node == null && wk.state == Worker.State.Idle)
                 {
-                    string kind = (needMana && toMana < 2) ? "mana" : "wood";
+                    string kind = (needMana || toMana < Mathf.Max(2, workers.Count - 2)) ? "mana" : "wood";
                     if (kind == "mana") toMana++;
                     var n = g.NearestNode(kind, w.transform.position);
                     if (n != null) wk.GatherAt(n);
@@ -65,26 +67,26 @@ namespace Eresoth
             // 2. 补工人
             if (workers.Count < 8) hall.TryTrain(workerDef);
 
-            // 3. 建筑顺序：步兵兵营 → 远程兵营 → 骑兵兵营 → 伐木场 → 民居（人口快满时）
+            // 3. 建筑顺序：兵种建筑 → 资源收集站分矿 → 民居（人口快满时）
             if (g.BuildingOfKind(ai, infKind) == null
-                && g.wood[aiIdx] >= infB.wood + 50)
+                && g.wood[aiIdx] >= infB.wood && g.mana[aiIdx] >= infB.mana)
                 g.BuildStructure(ai, infB);
             else if (g.BuildingOfKind(ai, rngKind) == null
-                && g.wood[aiIdx] >= rngB.wood + 50)
+                && g.wood[aiIdx] >= rngB.wood && g.mana[aiIdx] >= rngB.mana)
                 g.BuildStructure(ai, rngB);
             else if (g.BuildingOfKind(ai, cavKind) == null
-                && g.wood[aiIdx] >= cavB.wood + 50)
+                && g.wood[aiIdx] >= cavB.wood && g.mana[aiIdx] >= cavB.mana)
                 g.BuildStructure(ai, cavB);
-            else if (g.BuildingOfKind(ai, "lumber") == null
-                && g.wood[aiIdx] >= GameConfig.Lumber.wood + 50)
-                g.BuildStructure(ai, GameConfig.Lumber);   // 伐木场：采集 +50%
+            else if (g.buildings.FindAll(b => b.team == ai && b.kind == "resource_hub").Count < 2
+                && g.wood[aiIdx] >= GameConfig.Lumber.wood && g.mana[aiIdx] >= GameConfig.Lumber.mana)
+                g.BuildForwardResourceHub(ai);             // 远端收集站：主矿/分矿交付与采集加成
             else if (g.PopCount(aiIdx) > g.PopCap(ai) - 8
-                && g.wood[aiIdx] >= GameConfig.House.wood + 50)
+                && g.wood[aiIdx] >= GameConfig.House.wood && g.mana[aiIdx] >= GameConfig.House.mana)
                 g.BuildStructure(ai, GameConfig.House);    // 民居：人口快满时扩容
 
             // 4. 攀科技：木富余时轮流研究攻防（步兵兵营，单研究槽）
             var inf = g.BuildingOfKind(ai, infKind);
-            if (inf != null && inf.research == null && g.wood[aiIdx] > 250)
+            if (inf != null && inf.research == null && g.mana[aiIdx] > 220)
             {
                 int atk = g.TechLevel(ai, TechEffect.Atk);
                 int def = g.TechLevel(ai, TechEffect.Def);
@@ -130,13 +132,13 @@ namespace Eresoth
                     inf.TryTrain(heroUnit);
             }
             var rng = g.BuildingOfKind(ai, rngKind);
-            if (rng != null && g.mana[aiIdx] > 30 && (!counterMode || counter == UnitKind.Ranged))
+            if (rng != null && g.mana[aiIdx] > 80 && (!counterMode || counter == UnitKind.Ranged))
             {
                 int ranged = g.units.FindAll(u => IsAi(u) && u.def.kind == UnitKind.Ranged).Count;
                 if (ranged * 3 < ArmyCount(g)) rng.TryTrain(rngUnit);
             }
             var cav = g.BuildingOfKind(ai, cavKind);
-            if (cav != null && g.mana[aiIdx] > 60 && (!counterMode || counter == UnitKind.Cavalry))
+            if (cav != null && g.mana[aiIdx] > 140 && (!counterMode || counter == UnitKind.Cavalry))
             {
                 int count = g.units.FindAll(u => IsAi(u) && u.def.kind == UnitKind.Cavalry).Count;
                 if (count * 3 < ArmyCount(g)) cav.TryTrain(cavUnit);
@@ -173,8 +175,9 @@ namespace Eresoth
             }
 
             // 9. 兵力到阈值就压一波，每波规模递增；若玩家基地附近有重兵，先打部队而非直冲主基地
-            int need = 6 + wave * 2;
-            if (pHall != null && force.Count >= need)
+            int need = Mathf.Min(GameConfig.AiMaxAssaultForce,
+                GameConfig.AiMinAssaultForce + (wave % 4) * 2);
+            if (pHall != null && force.Count >= need && assaultCooldown <= 0f)
             {
                 Unit nearDef = null; float nd = 22f;
                 foreach (var u in g.units)
@@ -184,9 +187,11 @@ namespace Eresoth
                     if (d < nd) { nd = d; nearDef = u; }
                 }
                 wave++;
-                ITargetable tgt = nearDef != null && CountNear(pHall.transform.position, 22f) >= 4
-                    ? nearDef : pHall;
+                var enemyHub = g.buildings.Find(b => b.team == g.playerTeam && b.kind == "resource_hub" && !b.constructing);
+                ITargetable tgt = enemyHub != null && force.Count < 14 ? enemyHub
+                    : nearDef != null && CountNear(pHall.transform.position, 22f) >= 4 ? nearDef : pHall;
                 foreach (var u in force) u.CommandAttack(tgt);
+                assaultCooldown = GameConfig.AiAssaultInterval;
             }
         }
 

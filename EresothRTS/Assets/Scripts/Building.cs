@@ -12,15 +12,22 @@ namespace Eresoth
         public float hp;
         public float radius;
         public Vector3 rally;        // 集结点
+        public bool constructing;
+        public float constructionProgress;
+        readonly List<Unit> builders = new();
         public readonly List<UnitDef> queue = new();
         public string research;      // 当前研究中的科技 id，null = 空闲
         public float researchTimer;
         float timer;
         float towerCd;               // 防御塔攻击冷却
+        Transform constructionSite;
+        Renderer[] modelRenderers;
 
         public string kind => def.kind;
+        public int BuilderCount => builders.Count;
+        public bool NeedsBuilders => constructing && builders.Count < GameConfig.MaxBuildersPerBuilding;
 
-        public static Building Spawn(Team team, BuildingDef def, Vector3 pos)
+        public static Building Spawn(Team team, BuildingDef def, Vector3 pos, bool completed = true)
         {
             var root = new GameObject(def.name);
             root.transform.position = pos;
@@ -49,9 +56,13 @@ namespace Eresoth
 
             var b = root.AddComponent<Building>();
             b.team = team; b.def = def;
-            b.hp = def.hp;
+            b.constructing = !completed;
+            b.constructionProgress = completed ? 1f : 0f;
+            b.hp = completed ? def.hp : def.hp * .05f;
             b.radius = def.size * 0.7f;
             b.rally = pos + (pos.sqrMagnitude > 0.1f ? -pos.normalized * 7f : Vector3.right * 7f);
+            b.modelRenderers = root.GetComponentsInChildren<Renderer>(true);
+            if (!completed) b.BeginConstructionVisual();
 
             Game.I.buildings.Add(b);
             return b;
@@ -68,6 +79,16 @@ namespace Eresoth
         {
             if (Game.I.over) return;
             float dt = Time.deltaTime;
+
+            if (constructing)
+            {
+                builders.RemoveAll(u => u == null || !u.Alive || u.GetComponent<Worker>() == null);
+                if (builders.Count > 0)
+                    constructionProgress = Mathf.Clamp01(constructionProgress + dt * (1f + .75f * builders.Count) / GameConfig.ConstructionTime);
+                hp = Mathf.Max(1f, def.hp * Mathf.Lerp(.05f, 1f, constructionProgress));
+                if (constructionProgress >= 1f) CompleteConstruction();
+                return;
+            }
 
             if (queue.Count > 0)
             {
@@ -133,7 +154,8 @@ namespace Eresoth
         public bool TryTrain(UnitDef unitDef)
         {
             var g = Game.I;
-            if (queue.Count >= 5) { if (team == g.playerTeam) g.Toast("生产队列已满"); return false; }
+            if (constructing) { if (team == g.playerTeam) g.Toast("建筑尚未建成"); return false; }
+            if (queue.Count >= GameConfig.MaxProductionQueue) { if (team == g.playerTeam) g.Toast("生产队列已满"); return false; }
             if (g.PopCount((int)team) + unitDef.pop > g.PopCap(team))
             { if (team == g.playerTeam) g.Toast("人口已达上限（建民居可提升）"); return false; }
             if (unitDef.hero && g.units.Exists(u => u.team == team && u.def.hero))
@@ -147,6 +169,7 @@ namespace Eresoth
         public bool TryResearch(string techId)
         {
             var g = Game.I;
+            if (constructing) { if (team == g.playerTeam) g.Toast("建筑尚未建成"); return false; }
             var t = GameConfig.Techs[techId];
             int lvl = g.TechLevel(team, t.effect);
             if (lvl >= t.maxLevel) { if (team == g.playerTeam) g.Toast("已达最高等级"); return false; }
@@ -169,8 +192,48 @@ namespace Eresoth
 
         public void Damage(float dmg)
         {
-            hp -= dmg;
+            hp -= dmg * (constructing ? GameConfig.ConstructionDamageMultiplier : 1f);
             if (hp <= 0) { hp = 0; Destroy(gameObject); }
+        }
+
+        public bool AddBuilder(Unit worker)
+        {
+            if (!constructing || worker == null || builders.Contains(worker)
+                || builders.Count >= GameConfig.MaxBuildersPerBuilding) return false;
+            builders.Add(worker);
+            return true;
+        }
+
+        public void RemoveBuilder(Unit worker) => builders.Remove(worker);
+
+        void BeginConstructionVisual()
+        {
+            if (modelRenderers != null)
+                foreach (var r in modelRenderers) if (r != null) r.enabled = false;
+            var site = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
+            site.name = "ConstructionSite";
+            site.transform.SetParent(transform, false);
+            site.transform.localPosition = new Vector3(0, .08f, 0);
+            site.transform.localScale = new Vector3(def.size * .75f, .04f, def.size * .75f);
+            var col = site.GetComponent<Collider>();
+            if (col != null) Destroy(col);
+            site.GetComponent<Renderer>().sharedMaterial = Gfx.Mat(
+                team == Team.Player ? new Color(.35f, .8f, 1f) : new Color(.75f, .35f, 1f),
+                0f, .35f, true, .8f);
+            constructionSite = site.transform;
+        }
+
+        void CompleteConstruction()
+        {
+            constructing = false;
+            hp = def.hp;
+            if (modelRenderers != null)
+                foreach (var r in modelRenderers) if (r != null) r.enabled = true;
+            if (constructionSite != null) Destroy(constructionSite.gameObject);
+            foreach (var worker in builders)
+                if (worker != null) worker.GetComponent<Worker>()?.FinishBuilding(this);
+            builders.Clear();
+            if (team == Game.I.playerTeam) Game.I.Toast($"{def.name}建造完成");
         }
     }
 }

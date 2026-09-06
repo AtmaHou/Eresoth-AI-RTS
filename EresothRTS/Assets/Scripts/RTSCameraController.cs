@@ -30,8 +30,9 @@ namespace Eresoth
 
             transform.position += move.normalized * moveSpeed * dt;
             var p = transform.position;
-            p.x = Mathf.Clamp(p.x, -55, 55);
-            p.z = Mathf.Clamp(p.z, -55, 55);
+            float mapEdge = Game.MapHalfSize - 5f;
+            p.x = Mathf.Clamp(p.x, -mapEdge, mapEdge);
+            p.z = Mathf.Clamp(p.z, -mapEdge, mapEdge);
             transform.position = p;
 
             // 缩放：沿相机局部方向推拉

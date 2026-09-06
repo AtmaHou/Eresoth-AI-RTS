@@ -60,7 +60,7 @@ namespace Eresoth
                 case "barracks": case "crypt":      Barracks(root, h, s); break;
                 case "archery": case "dark_temple": Archery(root, h, s); break;
                 case "stable": case "death_stable": Stable(root, h, s); break;
-                case "lumber":                      Lumber(root, h, s); break;
+                case "resource_hub":                Lumber(root, h, s); break;
                 case "house":                       House(root, h, s); break;
                 default:                            Tower(root, h, s); break;
             }
@@ -366,7 +366,7 @@ namespace Eresoth
             }
         }
 
-        // ---------- 伐木场 ----------
+        // ---------- 资源收集站 ----------
 
         static void Lumber(Transform r, bool h, float s)
         {

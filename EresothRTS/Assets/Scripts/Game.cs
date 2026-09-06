@@ -10,8 +10,8 @@ namespace Eresoth
         public static Game I;
 
         [Header("资源（0=玩家 1=AI）")]
-        public int[] wood = { 120, 120 };
-        public int[] mana = { 60, 60 };
+        public int[] wood = { GameConfig.InitialWood, GameConfig.InitialWood };
+        public int[] mana = { GameConfig.InitialMana, GameConfig.InitialMana };
 
         [Header("科技等级（0=玩家 1=AI，每级攻防 +15%）")]
         public int[] atkLevel = { 0, 0 };
@@ -27,6 +27,7 @@ namespace Eresoth
         public int winner = -1;   // 0=玩家胜 1=AI胜
         public int seed;          // 本局地图种子（固定种子模式可复现布局）
         public Team playerTeam = Team.Player;   // 玩家操控的阵营（另一方归 AI）
+        public static float MapHalfSize => MapSettings.HalfSize;
         public string toast = "";
         float toastT;
 
@@ -58,6 +59,15 @@ namespace Eresoth
             started = true;
             // 阵营在开局面板里选，必须在此时才读取（Awake 早于玩家选择，先读会拿到默认值）
             playerTeam = MapSettings.playerTeam;
+            if (MapSettings.difficulty == Difficulty.Hard)
+            {
+                int ai = playerTeam == Team.Player ? (int)Team.Enemy : (int)Team.Player;
+                wood[ai] += GameConfig.AiHardBonusWood;
+                mana[ai] += GameConfig.AiHardBonusMana;
+            }
+            float baseOffset = MapSettings.HalfSize * .58f;
+            baseCenter[0] = new Vector3(-baseOffset, 0, -baseOffset);
+            baseCenter[1] = new Vector3(baseOffset, 0, baseOffset);
             var rig = GameObject.Find("CameraRig");
             if (rig != null) rig.transform.position = baseCenter[(int)playerTeam] + new Vector3(0, 0, -4);
             BuildWorld();
@@ -68,6 +78,8 @@ namespace Eresoth
             float dt = Time.deltaTime;
             if (toastT > 0) toastT -= dt;
             ProjStep(dt);
+            foreach (var b in buildings)
+                if (b != null && b.NeedsBuilders) AssignBuilders(b.team, b);
         }
 
         // ---------------- 弹道（远程兵种/英雄/箭塔共用） ----------------
@@ -150,13 +162,14 @@ namespace Eresoth
             seed = MapSettings.randomMap ? Random.Range(1, int.MaxValue) : 20240901;
             float richness = MapSettings.Richness;
             var rnd = new System.Random(seed);
+            float half = MapSettings.HalfSize - 5f;
 
             // ---- 资源生成：只为 0 号基地一侧布局，1 号取中心对称点（-p），从布局上保证双方公平 ----
-            int treeCount = Mathf.RoundToInt(26 * richness);
-            const int homeTrees = 9;   // 每方基地旁保底的"家树"数量，距离基地 16~26
+            int treeCount = Mathf.RoundToInt(16 * richness);
+            const int homeTrees = 6;   // 树木降为次要资源，主经济转向魔法矿
 
-            void PlaceWood(Vector3 p) { p.y = TerrainHeight(p.x, p.z); ResourceNode.Spawn("wood", p); }
-            void PlaceMana(Vector3 p) { p.y = TerrainHeight(p.x, p.z); ResourceNode.Spawn("mana", p); }
+            void PlaceWood(Vector3 p, int amount = 1000) { p.y = TerrainHeight(p.x, p.z); ResourceNode.Spawn("wood", p, amount); }
+            void PlaceMana(Vector3 p, int amount = 1500) { p.y = TerrainHeight(p.x, p.z); ResourceNode.Spawn("mana", p, amount); }
 
             // 家树：围绕 0 号基地环带生成，镜像到 1 号（间距校验对两侧都做）
             for (int i = 0; i < homeTrees; i++)
@@ -169,7 +182,7 @@ namespace Eresoth
                     p = baseCenter[0] + new Vector3((float)(System.Math.Cos(a) * r), 0, (float)(System.Math.Sin(a) * r));
                     guard++;
                 }
-                while (guard < 60 && (Mathf.Abs(p.x) > 55 || Mathf.Abs(p.z) > 55
+                while (guard < 60 && (Mathf.Abs(p.x) > MapSettings.HalfSize - 5f || Mathf.Abs(p.z) > MapSettings.HalfSize - 5f
                                     || NearNode(p, 4f) || NearNode(-p, 4f)));
                 PlaceWood(p); PlaceWood(-p);
             }
@@ -182,7 +195,7 @@ namespace Eresoth
                 int guard = 0;
                 do
                 {
-                    p = new Vector3((float)(rnd.NextDouble() * 110 - 55), 0, (float)(rnd.NextDouble() * 110 - 55));
+                    p = new Vector3((float)(rnd.NextDouble() * half * 2 - half), 0, (float)(rnd.NextDouble() * half * 2 - half));
                     guard++;
                 }
                 while (guard < 60 && (Vector3.Distance(p, baseCenter[0]) < 15
@@ -192,7 +205,7 @@ namespace Eresoth
                 PlaceWood(p); PlaceWood(-p);
             }
 
-            // 魔法矿：近矿（9~13 环带）围绕 0 号基地生成并镜像 → 双方"起始矿"距离结构完全一致
+            // 魔法矿：主资源。近矿 + 中央富集区，鼓励建资源收集站开分矿。
             int perBase = 2;
             for (int i = 0; i < perBase; i++)
             {
@@ -207,8 +220,8 @@ namespace Eresoth
                 while (guard < 60 && (NearNode(p, 5f) || NearNode(-p, 5f)));
                 PlaceMana(p); PlaceMana(-p);
             }
-            // 中场争夺矿：任何丰富度至少 1 对（标准 2 对、富饶 4 对），成对镜像保证公平
-            int midPairs = Mathf.Max(1, Mathf.RoundToInt(2 * richness));
+            // 中场争夺矿：标准地图 3 对，富饶地图更多；中央额外富集点数量和储量更高。
+            int midPairs = Mathf.Max(2, Mathf.RoundToInt(3 * richness));
             for (int i = 0; i < midPairs; i++)
             {
                 Vector3 p = Vector3.zero;
@@ -222,8 +235,15 @@ namespace Eresoth
                 PlaceMana(p); PlaceMana(-p);
             }
 
+            for (int i = 0; i < Mathf.Max(2, Mathf.RoundToInt(richness * 3)); i++)
+            {
+                double a = rnd.NextDouble() * 6.283;
+                float r = 7f + (float)rnd.NextDouble() * 7f;
+                PlaceMana(new Vector3((float)System.Math.Cos(a) * r, 0, (float)System.Math.Sin(a) * r), 3200);
+            }
+
             // 中场林场：成对镜像的小树丛，保证地图中央有木头可采（丰富度越高丛数越多）
-            int groves = 2 + Mathf.RoundToInt(richness * 1.5f);
+            int groves = 1 + Mathf.RoundToInt(richness);
             for (int g = 0; g < groves; g++)
             {
                 double ga = rnd.NextDouble() * 6.283, gr = 15 + rnd.NextDouble() * 11;
@@ -306,9 +326,11 @@ namespace Eresoth
         {
             float h = Mathf.PerlinNoise(x * .04f + 7, z * .04f + 3) * 2.6f
                     + Mathf.PerlinNoise(x * .11f + 2, z * .11f + 9) * .8f - 1.2f;
+            Vector3 base0 = I != null ? I.baseCenter[0] : new Vector3(-38, 0, -38);
+            Vector3 base1 = I != null ? I.baseCenter[1] : new Vector3(38, 0, 38);
             float flat = Mathf.Min(
-                Vector2.Distance(new Vector2(x, z), new Vector2(-38, -38)),
-                Vector2.Distance(new Vector2(x, z), new Vector2(38, 38)));
+                Vector2.Distance(new Vector2(x, z), new Vector2(base0.x, base0.z)),
+                Vector2.Distance(new Vector2(x, z), new Vector2(base1.x, base1.z)));
             float flatK = Mathf.InverseLerp(14f, 24f, flat);
             float centerK = Mathf.InverseLerp(8f, 16f, new Vector2(x, z).magnitude);
             return h * Mathf.Min(flatK, centerK);
@@ -318,7 +340,7 @@ namespace Eresoth
         /// 颜色烘成小尺寸贴图（URP Lit/Simple Lit 不乘顶点色，直接赋顶点色会渲成白色）。</summary>
         void BuildTerrain()
         {
-            const int size = 130, res = 52;
+            int size = Mathf.RoundToInt(MapSettings.WorldSize), res = 52;
             float half = size * .5f;
             var verts = new Vector3[(res + 1) * (res + 1)];
             var uvs = new Vector2[verts.Length];
@@ -397,8 +419,10 @@ namespace Eresoth
                     float w = 10f + (float)rnd.NextDouble() * 6f;
                     float h = 6f + (float)rnd.NextDouble() * 5f;
                     float d = 5f + (float)rnd.NextDouble() * 3f;
-                    Vector3 pos = horiz ? new Vector3(t, 0, sign * (66 + d * .2f))
-                                        : new Vector3(sign * (66 + d * .2f), 0, t);
+                    float edge = MapSettings.HalfSize + d * .2f;
+                    float along = t * MapSettings.HalfSize / 65f;
+                    Vector3 pos = horiz ? new Vector3(along, 0, sign * edge)
+                                        : new Vector3(sign * edge, 0, along);
                     // 贴地：按地形高度落地并稍微嵌入，避免底面悬空露出缝隙
                     pos.y = TerrainHeight(pos.x, pos.z) - .5f;
                     var c = rock * (.85f + (float)rnd.NextDouble() * .3f);
@@ -433,7 +457,9 @@ namespace Eresoth
             int n = Mathf.RoundToInt(90 * richness);
             for (int i = 0; i < n; i++)
             {
-                var p = new Vector3((float)(rnd.NextDouble() * 116 - 58), 0, (float)(rnd.NextDouble() * 116 - 58));
+                float half = MapSettings.HalfSize - 2f;
+                var p = new Vector3((float)(rnd.NextDouble() * half * 2 - half), 0,
+                    (float)(rnd.NextDouble() * half * 2 - half));
                 if (Vector3.Distance(p, baseCenter[0]) < 13 || Vector3.Distance(p, baseCenter[1]) < 13) continue;
                 if (NearNode(p, 2.5f)) continue;
                 p.y = TerrainHeight(p.x, p.z);
@@ -503,9 +529,13 @@ namespace Eresoth
             if (kind == "wood") wood[(int)team] += amount; else mana[(int)team] += amount;
         }
 
-        /// <summary>工人单次采集量；建有伐木场时 +50%。</summary>
+        /// <summary>工人单次采集量；建有资源收集站时 +50%。</summary>
         public int GatherAmt(Team team)
-            => Mathf.RoundToInt(GameConfig.GatherAmount * (BuildingOfKind(team, "lumber") != null ? 1.5f : 1f));
+        {
+            float amount = GameConfig.GatherAmount * (buildings.Exists(b => b.team == team && b.kind == "resource_hub" && !b.constructing) ? 1.5f : 1f);
+            if (team != playerTeam && MapSettings.difficulty == Difficulty.Hard) amount *= GameConfig.AiHardGatherMultiplier;
+            return Mathf.RoundToInt(amount);
+        }
 
         public int PopCount(int team)
         {
@@ -546,7 +576,7 @@ namespace Eresoth
         /// <summary>AI 建建筑：固定槽位；民居/箭塔可建多座，其余同 kind 全场一座。</summary>
         public bool BuildStructure(Team team, BuildingDef def)
         {
-            bool multi = def.kind == "tower" || def.kind == "house";
+            bool multi = def.kind == "tower" || def.kind == "house" || def.kind == "resource_hub";
             if (!multi && BuildingOfKind(team, def.kind) != null)
             { if (team == playerTeam) Toast($"{def.name}已建成"); return false; }
 
@@ -561,11 +591,42 @@ namespace Eresoth
                 if (occupied) continue;
 
                 if (!TrySpend((int)team, def.wood, def.mana)) return false;
-                Building.Spawn(team, def, p);
+                var building = Building.Spawn(team, def, p, false);
+                AssignBuilders(team, building);
                 return true;
             }
             if (team == playerTeam) Toast("基地周围没有空地");
             return false;
+        }
+
+        public bool BuildForwardResourceHub(Team team)
+        {
+            var def = GameConfig.Lumber;
+            if (buildings.FindAll(b => b.team == team && b.kind == "resource_hub").Count >= 3) return false;
+            var hall = Hall(team);
+            if (hall == null) return false;
+            ResourceNode best = null; float bestScore = float.MaxValue;
+            foreach (var n in nodes)
+            {
+                if (n.kind != "mana") continue;
+                float d = Vector3.Distance(n.transform.position, hall.transform.position);
+                if (d < 22f) continue;
+                if (buildings.Exists(b => b.team == team && b.kind == "resource_hub"
+                    && Vector3.Distance(b.transform.position, n.transform.position) < 12f)) continue;
+                if (d < bestScore) { best = n; bestScore = d; }
+            }
+            if (best == null || !TrySpend((int)team, def.wood, def.mana)) return false;
+            Vector3 dir = (best.transform.position - hall.transform.position).normalized;
+            Vector3 p = best.transform.position - dir * 5f;
+            p.y = TerrainHeight(p.x, p.z);
+            if (!CanPlaceAt(team, def, p, out _))
+            {
+                wood[(int)team] += def.wood; mana[(int)team] += def.mana;
+                return false;
+            }
+            var building = Building.Spawn(team, def, p, false);
+            AssignBuilders(team, building);
+            return true;
         }
 
         /// <summary>校验玩家自由选址：地图边界、主基地半径、与其他建筑/资源点不重叠。err 为失败原因。</summary>
@@ -574,12 +635,16 @@ namespace Eresoth
             err = null;
             if (Mathf.Abs(p.x) > 58f || Mathf.Abs(p.z) > 58f) { err = "超出地图边界"; return false; }
             var hall = Hall(team);
-            if (hall == null || Vector3.Distance(p, hall.transform.position) > BuildRadius)
+            bool resourceHub = def.kind == "resource_hub";
+            bool nearResource = resourceHub && NearestNodeAny(p) != null
+                && Vector3.Distance(NearestNodeAny(p).transform.position, p) < 16f;
+            if (!resourceHub && (hall == null || Vector3.Distance(p, hall.transform.position) > BuildRadius))
             { err = $"需在主基地 {BuildRadius:0} 格范围内"; return false; }
+            if (resourceHub && !nearResource) { err = "资源收集站必须靠近资源点"; return false; }
             foreach (var b in buildings)
                 if (Vector3.Distance(p, b.transform.position) < b.radius + def.size * 0.8f + 1f)
                 { err = "与其他建筑重叠"; return false; }
-            if (NearNode(p, 3f)) { err = "离资源点太近"; return false; }
+            if (!resourceHub && NearNode(p, 3f)) { err = "离资源点太近"; return false; }
             return true;
         }
 
@@ -591,13 +656,14 @@ namespace Eresoth
                 int towers = buildings.FindAll(b => b.team == team && b.kind == "tower").Count;
                 if (towers >= TowerCap) { if (team == playerTeam) Toast($"箭塔最多 {TowerCap} 座"); return false; }
             }
-            else if (def.kind != "house" && BuildingOfKind(team, def.kind) != null)
+            else if (def.kind != "house" && def.kind != "resource_hub" && BuildingOfKind(team, def.kind) != null)
             { if (team == playerTeam) Toast($"{def.name}已建成"); return false; }
 
             if (!CanPlaceAt(team, def, p, out string err))
             { if (team == playerTeam) Toast(err); return false; }
             if (!TrySpend((int)team, def.wood, def.mana)) return false;
-            Building.Spawn(team, def, p);
+            var building = Building.Spawn(team, def, p, false);
+            AssignBuilders(team, building);
             return true;
         }
 
@@ -616,6 +682,39 @@ namespace Eresoth
                 if (d < bd) { bd = d; best = b; }
             }
             return best;
+        }
+
+        public Building NearestDeposit(Team t, Vector3 p)
+        {
+            Building best = null; float bd = float.MaxValue;
+            foreach (var b in buildings)
+            {
+                if (b.team != t || b.constructing || (b.kind != "hall" && b.kind != "resource_hub")) continue;
+                float d = Vector3.Distance(p, b.transform.position);
+                if (d < bd) { bd = d; best = b; }
+            }
+            return best;
+        }
+
+        public void AssignBuilders(Team team, Building building)
+        {
+            if (building == null || building.constructing == false) return;
+            var candidates = units.FindAll(u => u.team == team && u.def.worker);
+            candidates.Sort((a, b) => Vector3.Distance(a.transform.position, building.transform.position)
+                .CompareTo(Vector3.Distance(b.transform.position, building.transform.position)));
+            int assigned = 0;
+            foreach (var u in candidates)
+            {
+                if (assigned >= GameConfig.MaxBuildersPerBuilding) break;
+                var w = u.GetComponent<Worker>();
+                if (w == null) continue;
+                if (team == playerTeam && !w.CanAutoBuild) continue;
+                if (team != playerTeam && w.state != Worker.State.Idle)
+                    w.StopGather();
+                if (w.state != Worker.State.Idle) continue;
+                w.BuildAt(building);
+                assigned++;
+            }
         }
 
         public ResourceNode NearestNode(string kind, Vector3 p)
@@ -648,8 +747,14 @@ namespace Eresoth
         {
             if (over) return;
             var aiTeam = playerTeam == Team.Player ? Team.Enemy : Team.Player;
-            if (Hall(aiTeam) == null) { over = true; winner = 0; }
-            else if (Hall(playerTeam) == null) { over = true; winner = 1; }
+            bool aiDefeated = MapSettings.victoryMode == VictoryMode.MainBase
+                ? Hall(aiTeam) == null
+                : !buildings.Exists(b => b.team == aiTeam && b.Alive);
+            bool playerDefeated = MapSettings.victoryMode == VictoryMode.MainBase
+                ? Hall(playerTeam) == null
+                : !buildings.Exists(b => b.team == playerTeam && b.Alive);
+            if (aiDefeated) { over = true; winner = 0; }
+            else if (playerDefeated) { over = true; winner = 1; }
         }
 
         public void Toast(string msg) { toast = msg; toastT = 2f; }

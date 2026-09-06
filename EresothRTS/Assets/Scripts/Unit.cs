@@ -11,6 +11,7 @@ namespace Eresoth
         public float hp;
         public ITargetable target;          // 当前敌人（单位或建筑）
         public Vector3 movePos;             // 玩家右键目的地
+        bool hasMoveOrder;                  // 显式移动期间禁止自动索敌
         public Unit lastAttacker;           // 最近攻击者（AI 军令层用）
         public bool busy;                   // 采集中（由 WorkerAI 维护）
         public int holdSlot = -1;           // 驻守法阵索引（-1 = 非驻守）
@@ -93,6 +94,7 @@ namespace Eresoth
         {
             target = null;
             movePos = p;
+            hasMoveOrder = true;
             var w = GetComponent<Worker>(); if (w != null) w.StopGather();
             busy = false;
         }
@@ -102,6 +104,7 @@ namespace Eresoth
         {
             target = t;
             movePos = t.Pos;
+            hasMoveOrder = false;
             var w = GetComponent<Worker>(); if (w != null) w.StopGather();
             busy = false;
         }
@@ -117,7 +120,7 @@ namespace Eresoth
             if (busy) return;   // 采集循环由 WorkerAI 驱动（移动与动画都在 Worker 里）
 
             // --- 目标决策：缓存目标失效则重寻最近敌（警戒范围） ---
-            if (target == null || !target.Alive)
+            if (!hasMoveOrder && (target == null || !target.Alive))
             {
                 target = null;
                 float best = def.aggro;
@@ -179,7 +182,14 @@ namespace Eresoth
                 }
                 else { Move(target.Pos, dt); moving = true; }
             }
-            else if (Vector3.Distance(transform.position, movePos) > .5f) { Move(movePos, dt); moving = true; }
+            else if (hasMoveOrder && Vector3.Distance(transform.position, movePos) > .5f)
+            {
+                Move(movePos, dt); moving = true;
+            }
+            else if (hasMoveOrder)
+            {
+                hasMoveOrder = false;
+            }
 
             Anim(moving ? 1f : 0f, dt);
         }

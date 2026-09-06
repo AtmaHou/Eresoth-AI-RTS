@@ -32,7 +32,7 @@ Main.unity
 4. `Game.StartGame()` 将 `started` 设为 `true`，调用 `BuildWorld()`。
 5. `BuildWorld()` 创建地面、边界、资源点、双方主基地和初始工人。
 6. Unity 每帧调用各组件的 `Update()`：单位行动、工人采集、建筑生产/研究、AI 决策、弹道飞行和镜头控制同时运行。
-7. 主基地被摧毁时，`Game.CheckEnd()` 设置胜负；`GameHUD` 显示结算界面。
+7. 按开局选择的胜利模式，主基地或全部建筑被摧毁时，`Game.CheckEnd()` 设置胜负；`GameHUD` 显示结算界面。
 
 ## 3. 模块说明
 
@@ -46,7 +46,7 @@ Main.unity
 - `BuildingDef`：建筑静态数据，如生命、造价、可训练单位、可研究科技和箭塔攻击参数。
 - `TechDef`：科技名称、费用、研究时间、最大等级和效果。
 - `MapSettings`：开局设置，并通过静态字段在“再来一局”时保留。
-- `GameConfig`：人口上限、采集速度、训练时间、克制倍率，以及所有单位/建筑/科技表。
+- `GameConfig`：人口上限、采集速度、训练时间、施工时间、生产队列上限、克制倍率，以及所有单位/建筑/科技表。
 
 **改数值时**优先改 `GameConfig`，不要把数值散落到行为脚本中。行为脚本只负责“怎么执行”。
 
@@ -59,7 +59,7 @@ Main.unity
 - 统一扣除资源、增加资源、统计人口和查询最近目标。
 - 管理远程攻击和箭塔共用的弹道系统。
 - 计算科技攻击/防御倍率、英雄攻击光环倍率和工人采集加成。
-- 校验建筑放置位置、执行建造、限制箭塔数量。
+- 校验建筑放置位置、创建施工对象、限制箭塔数量和资源收集站位置。
 - 检查主基地是否被摧毁并结束游戏。
 
 可以把它理解成“规则服务层”：实体负责自身行为，但跨实体的全局规则集中在这里。
@@ -73,6 +73,7 @@ Main.unity
 - `CommandMove(Vector3)`：清除攻击目标，设置移动目的地。
 - `CommandAttack(ITargetable)`：锁定单位或建筑目标。
 - `Update()`：按目标距离决定移动或攻击；没有显式目标时自动索敌。
+- `CommandMove()`：设置显式移动锁，移动完成前不会被自动索敌抢占；玩家可随时重新下达移动或攻击命令。
 - 被攻击后通过 `lastAttacker` 自动反击并追击。
 - 远程单位调用 `Game.SpawnProjectile()`，近战单位直接造成伤害。
 - `CounterMult()` 实现步兵克骑兵、远程克步兵、骑兵克远程。
@@ -80,18 +81,20 @@ Main.unity
 
 **未来接入 LLM 的关键位置**：LLM 不应直接改单位内部状态，而应最终调用 `CommandMove` 或 `CommandAttack`。
 
-### 3.4 `Worker.cs`：工人采集状态机
+### 3.4 `Worker.cs`：工人采集与施工状态机
 
-工人是带有 `Worker` 组件的 `Unit`。它不负责普通战斗，而是在以下状态之间循环：
+工人是带有 `Worker` 组件的 `Unit`。它不负责普通战斗，而是在采集和施工状态之间循环：
 
 ```text
 Idle -> ToNode -> Gathering -> Returning -> ToNode
+  \-> Constructing
 ```
 
 - `GatherAt()`：指定树木或魔法水晶。
 - 到达资源点后按 `GameConfig.GatherTime` 计时。
 - 采集量来自 `Game.GatherAmt()`；有伐木场时木材采集量增加 50%。
-- 回到最近主基地后通过 `Game.Deposit()` 入账。
+- 回到最近主基地或资源收集站后通过 `Game.Deposit()` 入账；收集站提供采集加成并支持分矿。
+- 建筑放置后，空闲工人进入 `Constructing`，建筑读条完成前生命值逐步增长，施工中受到双倍伤害；玩家重新派工人后不会被自动立即抢回。
 - 资源点耗尽后销毁，工人回到空闲状态。
 
 ### 3.5 `Building.cs`：建筑生产与科技
@@ -102,21 +105,21 @@ Idle -> ToNode -> Gathering -> Returning -> ToNode
 - 兵营/地穴：训练步兵和英雄，并研究攻防科技。
 - 弓箭场/诅咒神殿：训练远程单位。
 - 马厩/死亡马厩：训练骑兵。
-- 伐木场：为全阵营提供采集加成。
+- 资源收集站：作为远端资源交付点，并为全阵营提供采集加成。
 - 箭塔：自动寻找射程内最近敌方单位并发射弹道。
 
-生产使用 `queue`，一次最多排队 5 个单位；研究使用单独的 `research` 槽位。`TryTrain()` 和 `TryResearch()` 负责费用、人口、英雄唯一性和科技等级校验。
+生产使用 `queue`，所有可生产建筑统一最多排队 `GameConfig.MaxProductionQueue` 个单位；研究使用单独的 `research` 槽位。未完工建筑不能生产、研究或提供完整功能。
 
 ### 3.6 `EnemyAI.cs`：第一阶段脚本 AI
 
 AI 每 2 秒执行一轮固定优先级决策：
 
-1. 给空闲工人分配木材或魔法矿。
+1. 以魔法矿为主给空闲工人分配资源，保留少量工人采木。
 2. 主基地补充工人，最多维持 8 名工人。
-3. 按顺序建造步兵建筑、远程建筑、骑兵建筑和伐木场。
+3. 按顺序建造兵种建筑、远端资源收集站和民居。
 4. 轮流研究攻击和防御科技。
 5. 按步兵、远程、骑兵比例训练军队，并在资源充足时训练英雄。
-6. 部队达到阈值后集体攻击玩家主基地，波次规模逐渐增加。
+6. 部队达到阈值后持续集结攻击玩家；波次之间有冷却，AI 会在分矿、前线部队和主基地之间选择目标。
 
 它是规则驱动的执行体，不是通用规划器。后续如果加入 LLM，建议保留这里的基础执行能力，把 LLM 放在“决定目标/策略”的上层。
 
@@ -227,14 +230,16 @@ GameHUD 按钮
 | --- | --- |
 | 单位属性、建筑费用、科技数值 | `Common.cs` 的 `GameConfig` |
 | 新增单位类型或攻击效果 | `Unit.cs`、`UnitDef` |
-| 采集速度、资源点数量 | `Worker.cs`、`Game.BuildWorld()`、`GameConfig` |
-| 新建筑或生产队列 | `Building.cs`、`BuildingDef`、`GameHUD.cs` |
+| 采集速度、资源点数量、中央富集矿 | `Worker.cs`、`Game.BuildWorld()`、`GameConfig` |
+| 新建筑、施工或生产队列 | `Building.cs`、`BuildingDef`、`GameHUD.cs` |
 | 玩家快捷键和指挥方式 | `SelectionManager.cs` |
 | AI 行为和进攻节奏 | `EnemyAI.cs` |
-| 地图布局和随机规则 | `Game.BuildWorld()`、`MapSettings` |
+| 地图大小、中央富集区和随机规则 | `Game.BuildWorld()`、`MapSettings` |
 | 单位/建筑外观 | `Unit.BuildBody()`、`Building.Spawn()`、`Gfx.cs` |
 | 胜负条件 | `Game.CheckEnd()` |
 | LLM 军令接口 | `Unit.CommandMove()`、`Unit.CommandAttack()` |
+| 平衡参数 | `Common.cs` 的 `GameConfig` 顶部和各 `UnitDef` 行 |
+| AI 难度 | `MapSettings.difficulty`、`GameConfig.AiHard*` |
 
 ## 6. 修改时的注意事项
 

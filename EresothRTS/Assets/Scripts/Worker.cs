@@ -5,9 +5,11 @@ namespace Eresoth
     /// <summary>采集状态机：前往资源点 → 采集 → 回主基地交付 → 循环。</summary>
     public class Worker : MonoBehaviour
     {
-        public enum State { Idle, ToNode, Gathering, Returning }
+        public enum State { Idle, ToNode, Gathering, Returning, Constructing }
         public State state = State.Idle;
         public ResourceNode node;
+        public Building construction;
+        bool constructionOptOut;
         public int carry;
         string curKind = "wood";
         float t;
@@ -15,8 +17,19 @@ namespace Eresoth
 
         void Awake() { u = GetComponent<Unit>(); }
 
-        public void GatherAt(ResourceNode n) { node = n; state = State.ToNode; }
-        public void StopGather() { node = null; state = State.Idle; }
+        public bool CanAutoBuild => !constructionOptOut && state == State.Idle;
+        public void GatherAt(ResourceNode n) { StopGather(); constructionOptOut = true; node = n; state = State.ToNode; }
+        public void BuildAt(Building b) { node = null; construction = b; constructionOptOut = false; state = State.Constructing; }
+        public void FinishBuilding(Building b)
+        {
+            if (construction == b) { construction = null; constructionOptOut = false; state = State.Idle; }
+        }
+        public void StopGather()
+        {
+            if (construction != null) construction.RemoveBuilder(u);
+            if (construction != null) constructionOptOut = true;
+            node = null; construction = null; state = State.Idle;
+        }
 
         void Update()
         {
@@ -45,20 +58,26 @@ namespace Eresoth
                     break;
 
                 case State.Returning:
-                    var hall = Game.I.NearestHall(u.team, transform.position);
-                    if (hall == null) { state = State.Idle; break; }
-                    // 停靠半径要算上自身体积：碰撞推挤会把工人挡在 radius+自身半径处，否则永远交不了货
-                    if (u.MoveStep(hall.transform.position, dt, hall.radius + u.Radius + .2f))
+                    var deposit = Game.I.NearestDeposit(u.team, transform.position);
+                    if (deposit == null) { state = State.Idle; break; }
+                    if (u.MoveStep(deposit.transform.position, dt, deposit.radius + u.Radius + .2f))
                     {
                         Game.I.Deposit(u.team, curKind, carry);
                         carry = 0;
                         state = node != null ? State.ToNode : State.Idle;
                     }
                     break;
+
+                case State.Constructing:
+                    if (construction == null || !construction.Alive) { construction = null; state = State.Idle; break; }
+                    if (Vector3.Distance(transform.position, construction.transform.position) > construction.radius + u.Radius + .4f)
+                        u.MoveStep(construction.transform.position, dt, construction.radius + u.Radius + .4f);
+                    else
+                        construction.AddBuilder(u);
+                    break;
             }
 
-            // 往返途中驱动走路动画（Unit.Update 在 busy 时不再调用 Anim）
-            u.AnimWalk(state == State.ToNode || state == State.Returning, dt);
+            u.AnimWalk(state == State.ToNode || state == State.Returning || state == State.Constructing, dt);
         }
     }
 }

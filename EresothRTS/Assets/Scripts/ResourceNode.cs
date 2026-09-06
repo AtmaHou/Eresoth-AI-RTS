@@ -10,7 +10,7 @@ namespace Eresoth
 
         static readonly System.Random visualRnd = new(20240607);
 
-        public static ResourceNode Spawn(string kind, Vector3 pos)
+        public static ResourceNode Spawn(string kind, Vector3 pos, int amount = 1500)
         {
             bool wood = kind == "wood";
             var root = new GameObject(wood ? "树木" : "魔法水晶");
@@ -32,6 +32,7 @@ namespace Eresoth
 
             var n = root.AddComponent<ResourceNode>();
             n.kind = kind;
+            n.amount = amount;
             Game.I.nodes.Add(n);
             return n;
         }
