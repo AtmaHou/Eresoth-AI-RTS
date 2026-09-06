@@ -20,6 +20,8 @@ namespace Eresoth
         public float stunT;                 // 瘫痪剩余时间（督军锁链）
         float walkPhase;                    // 行走动画相位
         float atkAnim;                      // 攻击动画进度（0..1）
+        float steerT;                       // 绕行剩余时间（被建筑/人群挡住时 > 0）
+        float steerSide = 1f;               // 绕行方向 ±1
         Transform visual;                   // 视觉子物体（摆动动画只作用于此层，不影响逻辑朝向）
         BodyRig rig;                        // 动画挂点
 
@@ -205,14 +207,52 @@ namespace Eresoth
             Vector3 to = dest - transform.position; to.y = 0;
             if (to.magnitude < .1f) return;
             Face(dest);
-            transform.position += to.normalized * (def.speed * dt);
+            Vector3 dir = to.normalized;
+            // 被建筑/人群挡住时：向一侧偏转绕行（直线顶墙时径向推挤没有切向分力，会原地振荡卡死）
+            if (steerT > 0)
+            {
+                steerT -= dt;
+                dir = Quaternion.Euler(0, 75f * steerSide, 0) * dir;
+            }
+            var before = transform.position;
+            transform.position += dir * (def.speed * dt);
             // 贴合起伏地形
             var p = transform.position;
             p.y = Game.TerrainHeight(p.x, p.z);
             transform.position = p;
+            // 被挡检测：想动但实际位移远小于预期 → 触发一段绕行；选较空的一侧
+            if (steerT <= 0)
+            {
+                var a = new Vector2(before.x, before.z);
+                var b = new Vector2(p.x, p.z);
+                if (Vector2.Distance(a, b) < def.speed * dt * .35f)
+                {
+                    steerT = .55f;
+                    steerSide = PickSteerSide(dir);
+                }
+            }
         }
 
-        /// <summary>碰撞体积：与重叠的单位均摊推开、被建筑完全挤出，防止互相穿模。
+        /// <summary>选较空的一侧绕行：统计左右两侧建筑/单位的拥挤度，取空隙大的一边。</summary>
+        float PickSteerSide(Vector3 dir)
+        {
+            float left = 0f, right = 0f;
+            void Weigh(Vector3 pos, float r)
+            {
+                var d = pos - transform.position; d.y = 0;
+                float dist = d.magnitude;
+                if (dist > 7f || dist < .01f) return;
+                float w = (7f - dist) * r;
+                if (Vector3.Cross(dir, d).y > 0) left += w; else right += w;
+            }
+            foreach (var b in Game.I.buildings) Weigh(b.transform.position, 2f);
+            foreach (var u in Game.I.units) if (u != this && u.Alive) Weigh(u.transform.position, 1f);
+            if (Mathf.Abs(left - right) < .5f) return Random.value < .5f ? -1f : 1f;
+            return left < right ? -1f : 1f;
+        }
+
+        /// <summary>碰撞体积：自己被重叠的单位/建筑挤出，防止互相穿模。
+        /// 只移动自己、不推动别人——移动的兵会顺着切向分力绕开挡路者，而不是把前排挤开。
         /// 纯几何推挤（无刚体），每帧由 Unit.Update 调用。</summary>
         void ResolveOverlap()
         {
@@ -224,7 +264,7 @@ namespace Eresoth
                 var d = p - o.transform.position; d.y = 0;
                 float m = d.magnitude;
                 if (m < min)
-                    p += (m > .001f ? d / m : Vector3.right) * (min - m) * .5f;
+                    p += (m > .001f ? d / m : Vector3.right) * (min - m);
             }
             foreach (var b in Game.I.buildings)
             {
@@ -288,11 +328,11 @@ namespace Eresoth
                     rig.horseLegs[i].localRotation = Quaternion.Euler(Mathf.Sin(ph) * 22f * moveBlend, 0, 0);
                 }
 
-            // 行走时身体轻微起伏
+            // 行走时身体轻微起伏（绝对基准赋值：无腿单位若基于 p.y 累加会只加不减、越走越"飞升"）
             if (rig.torso != null && rig.horseLegs == null)
             {
                 var p = rig.torso.localPosition;
-                p.y = (rig.legL != null ? def.size * .75f : p.y) + Mathf.Abs(Mathf.Sin(walkPhase)) * .05f * moveBlend;
+                p.y = (rig.legL != null ? def.size * .75f : 0f) + Mathf.Abs(Mathf.Sin(walkPhase)) * .05f * moveBlend;
                 rig.torso.localPosition = p;
             }
 

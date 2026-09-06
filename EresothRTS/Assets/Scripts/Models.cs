@@ -201,8 +201,8 @@ namespace Eresoth
             Gfx.Prim(PrimitiveType.Cylinder, r, new Vector3(0, .30f + s * 1.42f, 0),
                      new Vector3(w * .97f, .05f, w * .97f), Pal.UBeam, 0f, .25f);
 
-            // 顶部悬浮死灵水晶：置于尖顶盖之上，与塔身分离不再穿模
-            var cry = Gfx.MeshGo(Gfx.Crystal(), r, new Vector3(0, .30f + s * 2.25f, 0),
+            // 顶部悬浮死灵水晶：贴在尖顶盖正上方微悬浮（下尖距盖顶约 0.1s），不再飘到天上
+            var cry = Gfx.MeshGo(Gfx.Crystal(), r, new Vector3(0, .30f + s * 2.06f, 0),
                        new Vector3(.7f, 1.1f, .7f), Pal.UGlow, 0f, .8f, true);
             cry.transform.localRotation = Quaternion.Euler(0, 25, 0);
 

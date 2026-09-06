@@ -116,16 +116,16 @@ namespace Eresoth
             // 选中建筑时：右键资源点=派空闲工人去采集（集结点同步设到资源处，新工人出厂即上工）；右键地面=设集结点
             if (selBuilding != null)
             {
-                var node = hit.collider.GetComponentInParent<ResourceNode>();
-                if (node != null)
+                var resNode = hit.collider.GetComponentInParent<ResourceNode>();
+                if (resNode != null)
                 {
-                    selBuilding.rally = node.transform.position;
+                    selBuilding.rally = resNode.transform.position;
                     int sent = 0;
                     foreach (var u in Game.I.units)
                     {
                         if (u.team != Game.I.playerTeam || !u.def.worker) continue;
                         var w = u.GetComponent<Worker>();
-                        if (w != null && w.state == Worker.State.Idle) { w.GatherAt(node); sent++; }
+                        if (w != null && w.state == Worker.State.Idle) { w.GatherAt(resNode); sent++; }
                     }
                     Game.I.Toast(sent > 0 ? $"已派 {sent} 个空闲工人去采集" : "没有空闲工人（集结点已设到资源处）");
                     return;

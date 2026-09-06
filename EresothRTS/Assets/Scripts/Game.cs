@@ -193,8 +193,7 @@ namespace Eresoth
             }
 
             // 魔法矿：近矿（9~13 环带）围绕 0 号基地生成并镜像 → 双方"起始矿"距离结构完全一致
-            int manaCount = Mathf.Max(2, Mathf.RoundToInt(4 * richness));
-            int perBase = manaCount / 2, center = manaCount - perBase * 2;
+            int perBase = 2;
             for (int i = 0; i < perBase; i++)
             {
                 Vector3 p = Vector3.zero;
@@ -208,8 +207,9 @@ namespace Eresoth
                 while (guard < 60 && (NearNode(p, 5f) || NearNode(-p, 5f)));
                 PlaceMana(p); PlaceMana(-p);
             }
-            // 中场争夺矿：成对镜像；奇数时最后一座放在对称轴上（同样公平）
-            for (int i = 0; i < center / 2; i++)
+            // 中场争夺矿：任何丰富度至少 1 对（标准 2 对、富饶 4 对），成对镜像保证公平
+            int midPairs = Mathf.Max(1, Mathf.RoundToInt(2 * richness));
+            for (int i = 0; i < midPairs; i++)
             {
                 Vector3 p = Vector3.zero;
                 int guard = 0;
@@ -218,15 +218,23 @@ namespace Eresoth
                     p = new Vector3((float)(rnd.NextDouble() * 44 - 22), 0, (float)(rnd.NextDouble() * 44 - 22));
                     guard++;
                 }
-                while (guard < 60 && (p.magnitude < 12 || NearNode(p, 5f) || NearNode(-p, 5f)));
+                while (guard < 60 && (p.magnitude < 11 || NearNode(p, 6f) || NearNode(-p, 6f)));
                 PlaceMana(p); PlaceMana(-p);
             }
-            if (center % 2 == 1)
+
+            // 中场林场：成对镜像的小树丛，保证地图中央有木头可采（丰富度越高丛数越多）
+            int groves = 2 + Mathf.RoundToInt(richness * 1.5f);
+            for (int g = 0; g < groves; g++)
             {
-                float zz = (float)(14 + rnd.NextDouble() * 8) * (rnd.NextDouble() < .5 ? 1 : -1);
-                var p = new Vector3(0, 0, zz);
-                if (NearNode(p, 5f)) p.x = 9;
-                PlaceMana(p);
+                double ga = rnd.NextDouble() * 6.283, gr = 15 + rnd.NextDouble() * 11;
+                var c = new Vector3((float)(System.Math.Cos(ga) * gr), 0, (float)(System.Math.Sin(ga) * gr));
+                int treesInGrove = 3 + rnd.Next(2);
+                for (int t = 0; t < treesInGrove; t++)
+                {
+                    var p = c + new Vector3((float)(rnd.NextDouble() * 7 - 3.5f), 0, (float)(rnd.NextDouble() * 7 - 3.5f));
+                    if (NearNode(p, 3.5f) || NearNode(-p, 3.5f)) continue;
+                    PlaceWood(p); PlaceWood(-p);
+                }
             }
 
             // 纯装饰植被：草丛/灌木/岩石/花/倒木，提升地面细节密度
@@ -381,18 +389,22 @@ namespace Eresoth
             {
                 bool horiz = side < 2;
                 float sign = side % 2 == 0 ? 1 : -1;
-                for (int i = 0; i < 14; i++)
+                // 20 段/边、宽度 10~16 大于间距 6.5 → 段与段必然搭接，不留漏空的缝；
+                // 朝向只做 ±15° 微调，保证相邻段轮廓连续
+                for (int i = 0; i < 20; i++)
                 {
-                    float t = -65f + i * 10f + (float)rnd.NextDouble() * 4f;
-                    float w = 8f + (float)rnd.NextDouble() * 6f;
-                    float h = 6f + (float)rnd.NextDouble() * 4f;
+                    float t = -65f + i * 6.5f + (float)(rnd.NextDouble() * 3 - 1.5);
+                    float w = 10f + (float)rnd.NextDouble() * 6f;
+                    float h = 6f + (float)rnd.NextDouble() * 5f;
                     float d = 5f + (float)rnd.NextDouble() * 3f;
-                    Vector3 pos = horiz ? new Vector3(t, h * .35f, sign * (66 + d * .2f))
-                                        : new Vector3(sign * (66 + d * .2f), h * .35f, t);
+                    Vector3 pos = horiz ? new Vector3(t, 0, sign * (66 + d * .2f))
+                                        : new Vector3(sign * (66 + d * .2f), 0, t);
+                    // 贴地：按地形高度落地并稍微嵌入，避免底面悬空露出缝隙
+                    pos.y = TerrainHeight(pos.x, pos.z) - .5f;
                     var c = rock * (.85f + (float)rnd.NextDouble() * .3f);
                     var cliff = Gfx.MeshGo(Gfx.Frustum(.55f + (float)rnd.NextDouble() * .3f, 5 + rnd.Next(3)),
                                    null, pos, new Vector3(w, h, d), c, 0f, .2f);
-                    cliff.transform.rotation = Quaternion.Euler(0, (float)rnd.NextDouble() * 360, 0);
+                    cliff.transform.rotation = Quaternion.Euler(0, (float)(rnd.NextDouble() * 30 - 15), 0);
                     // 崖顶草盖
                     Gfx.Prim(PrimitiveType.Cylinder, cliff.transform, Vector3.up * 1.02f,
                              new Vector3(1.02f, .06f, 1.02f), new Color(.32f, .45f, .24f) * (.8f + (float)rnd.NextDouble() * .4f), 0f, .2f);
@@ -403,7 +415,8 @@ namespace Eresoth
             {
                 float a = i * Mathf.PI * 2 / 8 + .3f;
                 float dist = 120 + (float)rnd.NextDouble() * 40;
-                var pos = new Vector3(Mathf.Cos(a) * dist, 0, Mathf.Sin(a) * dist);
+                // 底部下沉到地平线以下，避免浮空剪影露出"悬空"的底面
+                var pos = new Vector3(Mathf.Cos(a) * dist, -3f, Mathf.Sin(a) * dist);
                 float w = 30 + (float)rnd.NextDouble() * 26;
                 float h = 18 + (float)rnd.NextDouble() * 16;
                 var c = Color.Lerp(new Color(.45f, .5f, .6f), new Color(.6f, .65f, .75f), (float)rnd.NextDouble());

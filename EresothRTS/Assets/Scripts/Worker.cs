@@ -46,7 +46,8 @@ namespace Eresoth
                 case State.Returning:
                     var hall = Game.I.NearestHall(u.team, transform.position);
                     if (hall == null) { state = State.Idle; break; }
-                    if (u.MoveStep(hall.transform.position, dt, hall.radius))
+                    // 停靠半径要算上自身体积：碰撞推挤会把工人挡在 radius+自身半径处，否则永远交不了货
+                    if (u.MoveStep(hall.transform.position, dt, hall.radius + u.Radius + .2f))
                     {
                         Game.I.Deposit(u.team, curKind, carry);
                         carry = 0;
