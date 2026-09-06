@@ -144,6 +144,20 @@ namespace Eresoth
             if (eb != null && eb.team != Game.I.playerTeam)
             { foreach (var u in selected) u.CommandAttack(eb); return; }
 
+            // 右键己方未完工建筑：让选中的工人参与建造
+            if (eb != null && eb.team == Game.I.playerTeam && eb.constructing)
+            {
+                int sent = 0;
+                foreach (var u in selected)
+                {
+                    var w = u.GetComponent<Worker>();
+                    if (w != null) { w.BuildAt(eb); sent++; }
+                    else u.CommandMove(hit.point);
+                }
+                if (sent > 0) Game.I.Toast($"已派 {sent} 个工人前去建造");
+                return;
+            }
+
             var node = hit.collider.GetComponentInParent<ResourceNode>();
             if (node != null)
             {

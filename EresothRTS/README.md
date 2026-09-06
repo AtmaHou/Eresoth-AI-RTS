@@ -1,7 +1,7 @@
 # 厄瑞索斯 RTS · 第一阶段可玩 Demo（Eresoth RTS Phase 1）
 
 对应《RTS对战游戏项目启动设计文档》M1 垂直切片的先行版：**纯代码生成，零美术资源，开箱即玩**。
-当前版本 **v1.5.0**，详见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本 **v1.5.4**，详见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 代码导读
 

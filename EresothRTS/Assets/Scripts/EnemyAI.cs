@@ -20,7 +20,7 @@ namespace Eresoth
         void Update()
         {
             var g = Game.I;
-            if (g.over) return;
+            if (g == null || g.over) return;
             t -= Time.deltaTime;
             assaultCooldown -= Time.deltaTime;
             if (t > 0) return;
@@ -48,24 +48,12 @@ namespace Eresoth
             var atkTech = humanSide ? "human_atk" : "undead_atk";
             var defTech = humanSide ? "human_def" : "undead_def";
 
-            // 1. 采集分配：魔法矿是主经济，木材只保留少量工人采集
-            var workers = g.units.FindAll(u => IsAi(u) && u.def.worker);
-            bool needMana = g.mana[aiIdx] < 260;
-            int toMana = 0;
-            foreach (var w in workers)
-            {
-                var wk = w.GetComponent<Worker>();
-                if (wk.node == null && wk.state == Worker.State.Idle)
-                {
-                    string kind = (needMana || toMana < Mathf.Max(2, workers.Count - 2)) ? "mana" : "wood";
-                    if (kind == "mana") toMana++;
-                    var n = g.NearestNode(kind, w.transform.position);
-                    if (n != null) wk.GatherAt(n);
-                }
-            }
+            // 1. 采集分配：根据当前库存与后续建造/训练需求动态调整 wood/mana 比例
+            AssignGatherers(g, ai, aiIdx, humanSide, infB, rngB, cavB);
 
             // 2. 补工人
-            if (workers.Count < 8) hall.TryTrain(workerDef);
+            int workerCount = g.units.FindAll(u => IsAi(u) && u.def.worker).Count;
+            if (workerCount < 8) hall.TryTrain(workerDef);
 
             // 3. 建筑顺序：兵种建筑 → 资源收集站分矿 → 民居（人口快满时）
             if (g.BuildingOfKind(ai, infKind) == null
@@ -203,6 +191,78 @@ namespace Eresoth
                 if (u.team == Game.I.playerTeam && !u.def.worker
                     && Vector3.Distance(u.transform.position, pos) < r) c++;
             return c;
+        }
+
+        /// <summary>根据库存与建筑/训练需求，动态分配空闲工人采集 wood 或 mana。</summary>
+        void AssignGatherers(Game g, Team ai, int aiIdx, bool humanSide,
+            BuildingDef infB, BuildingDef rngB, BuildingDef cavB)
+        {
+            var workers = g.units.FindAll(u => IsAi(u) && u.def.worker);
+            if (workers.Count == 0) return;
+
+            // 计算后续想建造的建筑资源需求（只考虑待建建筑，训练需求动态变化，不提前占用分工）
+            float woodNeed = 0, manaNeed = 0;
+            void Need(BuildingDef d) { if (d != null) { woodNeed += d.wood; manaNeed += d.mana; } }
+
+            var inf = g.BuildingOfKind(ai, humanSide ? "barracks" : "crypt");
+            var rng = g.BuildingOfKind(ai, humanSide ? "archery" : "dark_temple");
+            var cav = g.BuildingOfKind(ai, humanSide ? "stable" : "death_stable");
+
+            if (inf == null) Need(infB);
+            if (rng == null) Need(rngB);
+            if (cav == null) Need(cavB);
+            if (g.buildings.FindAll(b => b.team == ai && b.kind == "resource_hub").Count < 2) Need(GameConfig.Lumber);
+            if (g.PopCount(aiIdx) > g.PopCap(ai) - 8) Need(GameConfig.House);
+
+            // 当前库存缺口
+            float woodGap = Mathf.Max(0, woodNeed - g.wood[aiIdx]);
+            float manaGap = Mathf.Max(0, manaNeed - g.mana[aiIdx]);
+            float totalGap = woodGap + manaGap;
+
+            // 基础目标比例：按建筑缺口分配
+            float manaRatio = totalGap > 0 ? manaGap / totalGap : 0.5f;
+
+            // 库存紧缺修正：若木头库存占比明显偏低，则强制提高采木优先级，避免木头卡住建筑进度
+            float totalStock = g.wood[aiIdx] + g.mana[aiIdx];
+            float stockWoodRatio = totalStock > 0 ? g.wood[aiIdx] / totalStock : 0.5f;
+            if (stockWoodRatio < 0.30f) manaRatio = Mathf.Min(manaRatio, 0.50f);
+            if (stockWoodRatio < 0.20f) manaRatio = Mathf.Min(manaRatio, 0.40f);
+
+            // 保证至少 35% 工人采木、最多 65% 采魔，避免早期过度偏向魔法矿而断木
+            manaRatio = Mathf.Clamp(manaRatio, 0.35f, 0.65f);
+            int targetMana = Mathf.RoundToInt(workers.Count * manaRatio);
+            targetMana = Mathf.Clamp(targetMana, 1, workers.Count - 1);
+
+            int toMana = 0, toWood = 0;
+            foreach (var w in workers)
+            {
+                var wk = w.GetComponent<Worker>();
+                if (wk == null) continue;
+                // 只动真正空闲的工人；已在路上的保持原目标（避免反复切换）
+                if (wk.node != null || wk.state != Worker.State.Idle) continue;
+
+                string kind;
+                if (toMana < targetMana) { kind = "mana"; toMana++; }
+                else { kind = "wood"; toWood++; }
+
+                var n = g.NearestNode(kind, w.transform.position);
+                if (n != null) wk.GatherAt(n);
+            }
+        }
+
+        /// <summary>建筑建成后由 Building 回调，立即把释放出来的空闲工人重新投入采集。</summary>
+        public void OnBuildingCompleted(Team team)
+        {
+            if (team != Ai) return;
+            var g = Game.I;
+            if (g == null || g.over) return;
+            var ai = Ai;
+            int aiIdx = (int)ai;
+            bool humanSide = ai == Team.Player;
+            var infB = humanSide ? GameConfig.Barracks : GameConfig.Crypt;
+            var rngB = humanSide ? GameConfig.Archery : GameConfig.DarkTemple;
+            var cavB = humanSide ? GameConfig.Stable : GameConfig.DeathStable;
+            AssignGatherers(g, ai, aiIdx, humanSide, infB, rngB, cavB);
         }
 
         // 战斗兵种总数（不含工人），用于 步:弓:骑 ≈ 3:2:2 的比例控制

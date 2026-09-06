@@ -77,7 +77,7 @@ namespace Eresoth
 
         void Update()
         {
-            if (Game.I.over) return;
+            if (Game.I == null || Game.I.over) return;
             float dt = Time.deltaTime;
 
             if (constructing)
@@ -234,6 +234,8 @@ namespace Eresoth
                 if (worker != null) worker.GetComponent<Worker>()?.FinishBuilding(this);
             builders.Clear();
             if (team == Game.I.playerTeam) Game.I.Toast($"{def.name}建造完成");
+            // 通知 AI 立即把释放的工人重新投入采集，而不是等到下一波 2 秒决策
+            Game.I.enemyAI?.OnBuildingCompleted(team);
         }
     }
 }

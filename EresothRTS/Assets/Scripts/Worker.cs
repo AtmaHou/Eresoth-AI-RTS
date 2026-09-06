@@ -5,11 +5,10 @@ namespace Eresoth
     /// <summary>采集状态机：前往资源点 → 采集 → 回主基地交付 → 循环。</summary>
     public class Worker : MonoBehaviour
     {
-        public enum State { Idle, ToNode, Gathering, Returning, Constructing }
+        public enum State { Idle, ToNode, Gathering, Returning, Constructing, Building }
         public State state = State.Idle;
         public ResourceNode node;
-        public Building construction;
-        bool constructionOptOut;
+        public Building construction;        bool constructionOptOut;
         public int carry;
         string curKind = "wood";
         float t;
@@ -19,7 +18,12 @@ namespace Eresoth
 
         public bool CanAutoBuild => !constructionOptOut && state == State.Idle;
         public void GatherAt(ResourceNode n) { StopGather(); constructionOptOut = true; node = n; state = State.ToNode; }
-        public void BuildAt(Building b) { node = null; construction = b; constructionOptOut = false; state = State.Constructing; }
+        public void BuildAt(Building b)
+        {
+            node = null;
+            if (construction != null && construction != b) construction.RemoveBuilder(u);
+            construction = b; constructionOptOut = false; state = State.Constructing;
+        }
         public void FinishBuilding(Building b)
         {
             if (construction == b) { construction = null; constructionOptOut = false; state = State.Idle; }
@@ -33,7 +37,7 @@ namespace Eresoth
 
         void Update()
         {
-            if (Game.I.over) return;
+            if (Game.I == null || Game.I.over) return;
             float dt = Time.deltaTime;
             u.busy = state != State.Idle;   // 采集中时 Unit.Update 让位，由本状态机驱动移动
             switch (state)
@@ -69,15 +73,25 @@ namespace Eresoth
                     break;
 
                 case State.Constructing:
-                    if (construction == null || !construction.Alive) { construction = null; state = State.Idle; break; }
-                    if (Vector3.Distance(transform.position, construction.transform.position) > construction.radius + u.Radius + .4f)
-                        u.MoveStep(construction.transform.position, dt, construction.radius + u.Radius + .4f);
-                    else
-                        construction.AddBuilder(u);
+                    if (construction == null || !construction.Alive || !construction.constructing)
+                    { construction = null; state = State.Idle; break; }
+                    float buildStopDist = construction.radius + u.Radius + 1.2f;
+                    if (!u.MoveStep(construction.transform.position, dt, buildStopDist)) break;
+                    if (construction.AddBuilder(u)) state = State.Building;
+                    break;
+
+                case State.Building:
+                    if (construction == null || !construction.Alive || !construction.constructing)
+                    { construction = null; state = State.Idle; break; }
+                    // 已在建造位，保持静止并由 Building 推进进度；被推开时重新归位
+                    float keepDist = construction.radius + u.Radius + 1.4f;
+                    if (Vector3.Distance(transform.position, construction.transform.position) > keepDist + 0.3f)
+                        state = State.Constructing;
                     break;
             }
 
             u.AnimWalk(state == State.ToNode || state == State.Returning || state == State.Constructing, dt);
+            // 建造时播放工作动画（手臂小幅摆动）由 Unit.Anim 的行走混合驱动；此处保持静止即可
         }
     }
 }

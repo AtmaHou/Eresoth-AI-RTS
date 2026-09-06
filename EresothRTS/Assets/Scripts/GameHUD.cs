@@ -26,6 +26,7 @@ namespace Eresoth
         void OnGUI()
         {
             var g = Game.I;
+            if (g == null) return;
             EnsureStyles();
 
             // 开局设置面板：确认后才生成世界

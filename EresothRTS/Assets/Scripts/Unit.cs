@@ -113,7 +113,7 @@ namespace Eresoth
 
         void Update()
         {
-            if (Game.I.over) return;
+            if (Game.I == null || Game.I.over) return;
             float dt = Time.deltaTime;
             if (stunT > 0) { stunT -= dt; Anim(0, dt); return; } // 瘫痪：静止
             ResolveOverlap();                    // 碰撞体积：单位/建筑间推挤，防穿模

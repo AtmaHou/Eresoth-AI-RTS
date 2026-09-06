@@ -119,74 +119,69 @@ namespace Eresoth
 
     public static class GameConfig
     {
-        // 调试平衡总表：经济、战斗、生产、施工和 AI 参数集中在这里修改。
-        public const int InitialWood = 70;
-        public const int InitialMana = 180;
-        public const int AiHardBonusWood = 90;
-        public const int AiHardBonusMana = 180;
-        public const float AiHardGatherMultiplier = 1.35f;
-        public const float AiAssaultInterval = 18f;
-        public const int AiMinAssaultForce = 6;
-        public const int AiMaxAssaultForce = 12;
-        public const int BasePop = 40;      // 主基地自带人口
-        public const int HousePop = 15;     // 每座民居 +15 人口
-        public const int MaxPopCap = 100;   // 人口硬上限
-        public const int GatherAmount = 8;      // 单次采集量
-        public const float GatherTime = 2f;     // 单次采集耗时(秒)
-        public const float TrainTime = 2.5f;    // 单位训练耗时(秒)
-        public const int MaxProductionQueue = 5; // 所有可生产建筑统一最大队列
-        public const float ConstructionTime = 8f;
-        public const int MaxBuildersPerBuilding = 3;
-        public const float ConstructionDamageMultiplier = 2f;
-        public const float CounterBonus = 1.5f; // 循环克制伤害加成：步兵克骑兵、远程克步兵、骑兵(高速)克远程
-        public const float SplashFrac = 0.5f;   // 英雄 AOE 对主目标周围单位的溅射伤害比例
-        public const int HeroCap = 1;           // 每方英雄同时存在上限
+        // 调试平衡总表现已迁移到可外部编辑的 RTSConfig ScriptableObject。
+        // GameConfig 保留原有静态接口，内部代理到 RuntimeConfig，保证旧代码零改动。
+        public static int InitialWood => RuntimeConfig.Data.initialWood;
+        public static int InitialMana => RuntimeConfig.Data.initialMana;
+        public static int AiHardBonusWood => RuntimeConfig.Data.aiHardBonusWood;
+        public static int AiHardBonusMana => RuntimeConfig.Data.aiHardBonusMana;
+        public static float AiHardGatherMultiplier => RuntimeConfig.Data.aiHardGatherMultiplier;
+        public static float AiAssaultInterval => RuntimeConfig.Data.aiAssaultInterval;
+        public static int AiMinAssaultForce => RuntimeConfig.Data.aiMinAssaultForce;
+        public static int AiMaxAssaultForce => RuntimeConfig.Data.aiMaxAssaultForce;
+        public static int BasePop => RuntimeConfig.Data.basePop;
+        public static int HousePop => RuntimeConfig.Data.housePop;
+        public static int MaxPopCap => RuntimeConfig.Data.maxPopCap;
+        public static int GatherAmount => RuntimeConfig.Data.gatherAmount;
+        public static float GatherTime => RuntimeConfig.Data.gatherTime;
+        public static float TrainTime => RuntimeConfig.Data.trainTime;
+        public static int MaxProductionQueue => RuntimeConfig.Data.maxProductionQueue;
+        public static float ConstructionTime => RuntimeConfig.Data.constructionTime;
+        public static int MaxBuildersPerBuilding => RuntimeConfig.Data.maxBuildersPerBuilding;
+        public static float ConstructionDamageMultiplier => RuntimeConfig.Data.constructionDamageMultiplier;
+        public static float CounterBonus => RuntimeConfig.Data.counterBonus;
+        public static float SplashFrac => RuntimeConfig.Data.splashFrac;
+        public static int HeroCap => RuntimeConfig.Data.heroCap;
 
         // ---- 人类（玩家阵营）：工人 + 步兵/远程/骑兵 ----
-        public static readonly UnitDef Farmer  = new("farmer",     "农夫",     UnitKind.Worker,    45,  3, 1.2f, 5.5f, 1.0f, 0,  0.80f,  10,  40,  1, true,  new Color(.85f, .75f, .55f));
-        public static readonly UnitDef Footman = new("footman",    "步兵",     UnitKind.Infantry,  110, 10, 1.6f, 5.0f, 1.1f, 9,  0.95f,  10,  50,  1, false, new Color(.55f, .65f, .95f));
-        public static readonly UnitDef Archer  = new("archer",     "长弓手",   UnitKind.Ranged,    65,  12, 9.0f, 5.0f, 1.2f, 10, 0.85f,  10,  50, 1, false, new Color(.45f, .85f, .55f));
-        public static readonly UnitDef Knight  = new("knight",     "骑士",     UnitKind.Cavalry,   170, 17, 1.8f, 7.5f, 1.3f, 9,  1.15f,  30,  90, 2, false, new Color(.90f, .85f, .40f));
+        public static UnitDef Farmer => RuntimeConfig.Farmer;
+        public static UnitDef Footman => RuntimeConfig.Footman;
+        public static UnitDef Archer => RuntimeConfig.Archer;
+        public static UnitDef Knight => RuntimeConfig.Knight;
 
         // ---- 不死（AI 阵营）：工人 + 步兵/远程/骑兵 ----
-        public static readonly UnitDef Acolyte     = new("acolyte",     "侍僧",     UnitKind.Worker,   40,  3, 1.2f, 5.5f, 1.0f, 0,  0.80f,  10,  40,  1, true,  new Color(.50f, .40f, .55f));
-        public static readonly UnitDef Skeleton    = new("skeleton",    "骷髅兵",   UnitKind.Infantry, 100, 9, 1.5f, 5.0f, 1.0f, 9,  0.85f,  5,  45,  1, false, new Color(.90f, .90f, .85f));
-        public static readonly UnitDef DarkArcher  = new("darkarcher",  "亡灵射手", UnitKind.Ranged,   60,  11, 9.0f, 5.0f, 1.2f, 10, 0.85f,  10,  50, 1, false, new Color(.65f, .45f, .85f));
-        public static readonly UnitDef DeathKnight = new("deathknight", "死亡骑士", UnitKind.Cavalry,  160, 16, 1.8f, 7.5f, 1.3f, 9,  1.15f,  30,  90, 2, false, new Color(.55f, .60f, .70f));
+        public static UnitDef Acolyte => RuntimeConfig.Acolyte;
+        public static UnitDef Skeleton => RuntimeConfig.Skeleton;
+        public static UnitDef DarkArcher => RuntimeConfig.DarkArcher;
+        public static UnitDef DeathKnight => RuntimeConfig.DeathKnight;
 
         // ---- 英雄（全场唯一，兵营训练）：数值强化 + 攻击光环 + AOE 溅射 ----
-        public static readonly UnitDef LordKnight = new("lordknight", "骑士团长", UnitKind.Cavalry, 650, 34, 2.2f, 7.5f, 1.2f, 10, 1.50f,
-            100, 300, 3, false, new Color(1f, .92f, .45f), hero: true, auraRadius: 10f, auraBonus: 0.25f, aoeRadius: 3f);
-        public static readonly UnitDef DeathRanger = new("deathranger", "霜骨巫妖", UnitKind.Ranged, 520, 30, 10f, 5.5f, 1.1f, 11, 1.10f,
-            100, 300, 3, false, new Color(.85f, .55f, 1f), hero: true, auraRadius: 10f, auraBonus: 0.25f, aoeRadius: 2.5f);
+        public static UnitDef LordKnight => RuntimeConfig.LordKnight;
+        public static UnitDef DeathRanger => RuntimeConfig.DeathRanger;
 
         // ---- 第一层科技：兵种攻防强化（每级 +15%，造价 = 基础 × 等级）----
-        public static readonly TechDef HumanAtk  = new("human_atk",  "利刃淬炼", "全军攻击 +15%",       50, 100, 20f, 2, TechEffect.Atk);
-        public static readonly TechDef HumanDef  = new("human_def",  "坚壁工事", "全军受伤减免约 13%",  50, 100, 20f, 2, TechEffect.Def);
-        public static readonly TechDef UndeadAtk = new("undead_atk", "白骨磨锋", "全军攻击 +15%",       50, 100, 20f, 2, TechEffect.Atk);
-        public static readonly TechDef UndeadDef = new("undead_def", "腐躯硬化", "全军受伤减免约 13%",  50, 100, 20f, 2, TechEffect.Def);
+        public static TechDef HumanAtk => RuntimeConfig.Techs["human_atk"];
+        public static TechDef HumanDef => RuntimeConfig.Techs["human_def"];
+        public static TechDef UndeadAtk => RuntimeConfig.Techs["undead_atk"];
+        public static TechDef UndeadDef => RuntimeConfig.Techs["undead_def"];
 
-        public static readonly Dictionary<string, TechDef> Techs = new()
-        {
-            { HumanAtk.id, HumanAtk }, { HumanDef.id, HumanDef },
-            { UndeadAtk.id, UndeadAtk }, { UndeadDef.id, UndeadDef },
-        };
+        public static Dictionary<string, TechDef> Techs => RuntimeConfig.Techs;
 
         // ---- 建筑表：主基地 + 每类兵种一座专属兵营（科技在步兵兵营研究）----
-        // 资源收集站：工人采集量 +50%并作为交付点（可建多座）；箭塔：自动攻击的防御塔（可建多座）
-        // 民居：人口 +15（可建多座，主基地 40 + 4 民居正好到 100 上限）
-        public static readonly BuildingDef Hall        = new("hall",        "主基地",   0,   0,   1500, 5.0f);
-        public static readonly BuildingDef Barracks    = new("barracks",    "兵营",     50, 100, 800,  3.6f, new[] { Footman, LordKnight }, new[] { "human_atk", "human_def" });
-        public static readonly BuildingDef Archery     = new("archery",     "弓箭场",   40, 110, 700,  3.2f, new[] { Archer });
-        public static readonly BuildingDef Stable      = new("stable",      "马厩",     50, 140, 800,  3.6f, new[] { Knight });
-        public static readonly BuildingDef Lumber      = new("resource_hub", "资源收集站", 30, 80, 600, 3.0f);
-        public static readonly BuildingDef Tower       = new("tower",       "箭塔",     20,  80, 350,  2.6f, atk: 12, atkRange: 11, atkCd: 1f);
-        public static readonly BuildingDef House       = new("house",       "民居",     20,  70, 400,  3.0f);
-        public static readonly BuildingDef Crypt       = new("crypt",       "地穴",     50, 100, 800,  3.6f, new[] { Skeleton, DeathRanger }, new[] { "undead_atk", "undead_def" });
-        public static readonly BuildingDef DarkTemple  = new("dark_temple", "诅咒神殿", 40, 110, 700,  3.2f, new[] { DarkArcher });
-        public static readonly BuildingDef DeathStable = new("death_stable","死亡马厩", 50, 140, 800,  3.6f, new[] { DeathKnight });
+        public static BuildingDef Hall => RuntimeConfig.Hall;
+        public static BuildingDef Barracks => RuntimeConfig.Barracks;
+        public static BuildingDef Archery => RuntimeConfig.Archery;
+        public static BuildingDef Stable => RuntimeConfig.Stable;
+        public static BuildingDef Lumber => RuntimeConfig.Lumber;
+        public static BuildingDef Tower => RuntimeConfig.Tower;
+        public static BuildingDef House => RuntimeConfig.House;
+        public static BuildingDef Crypt => RuntimeConfig.Crypt;
+        public static BuildingDef DarkTemple => RuntimeConfig.DarkTemple;
+        public static BuildingDef DeathStable => RuntimeConfig.DeathStable;
 
-        public static readonly BuildingDef[] HumanBuildings  = { Barracks, Archery, Stable, Lumber, Tower, House };
-        public static readonly BuildingDef[] UndeadBuildings = { Crypt, DarkTemple, DeathStable, Lumber, Tower, House };
+        public static BuildingDef[] HumanBuildings => RuntimeConfig.Data.factionBuildings.humanBuildingKinds
+            .ConvertAll(k => RuntimeConfig.Buildings[k]).ToArray();
+        public static BuildingDef[] UndeadBuildings => RuntimeConfig.Data.factionBuildings.undeadBuildingKinds
+            .ConvertAll(k => RuntimeConfig.Buildings[k]).ToArray();
     }
 }

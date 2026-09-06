@@ -10,8 +10,8 @@ namespace Eresoth
         public static Game I;
 
         [Header("资源（0=玩家 1=AI）")]
-        public int[] wood = { GameConfig.InitialWood, GameConfig.InitialWood };
-        public int[] mana = { GameConfig.InitialMana, GameConfig.InitialMana };
+        public int[] wood = new int[2];
+        public int[] mana = new int[2];
 
         [Header("科技等级（0=玩家 1=AI，每级攻防 +15%）")]
         public int[] atkLevel = { 0, 0 };
@@ -27,6 +27,7 @@ namespace Eresoth
         public int winner = -1;   // 0=玩家胜 1=AI胜
         public int seed;          // 本局地图种子（固定种子模式可复现布局）
         public Team playerTeam = Team.Player;   // 玩家操控的阵营（另一方归 AI）
+        public EnemyAI enemyAI;                 // AI 逻辑句柄，供 Building 等模块回调
         public static float MapHalfSize => MapSettings.HalfSize;
         public string toast = "";
         float toastT;
@@ -43,12 +44,24 @@ namespace Eresoth
         {
             I = this;
             Application.targetFrameRate = 60;
+        }
+
+        void OnEnable()
+        {
+            // 脚本重载（编辑器编译/热更）后静态单例会丢失，重新绑定
+            if (I == null) I = this;
+
+            // 先加载可外部编辑的运行时配置；后续所有 GameConfig 代理属性均依赖此初始化。
+            RuntimeConfig.Initialize();
+            wood[0] = wood[1] = GameConfig.InitialWood;
+            mana[0] = mana[1] = GameConfig.InitialMana;
+
             // 相机在开局前就要存在，否则开始界面 "no game rendering" 报错；开局时再按所选阵营对准基地
             baseCenter[0] = new Vector3(-38, 0, -38); // 0 号位：左下
             baseCenter[1] = new Vector3( 38, 0,  38); // 1 号位：右上
             BuildCamera();
             gameObject.AddComponent<SelectionManager>();
-            gameObject.AddComponent<EnemyAI>();
+            enemyAI = gameObject.AddComponent<EnemyAI>();
             gameObject.AddComponent<GameHUD>();
         }
 
@@ -703,17 +716,30 @@ namespace Eresoth
             candidates.Sort((a, b) => Vector3.Distance(a.transform.position, building.transform.position)
                 .CompareTo(Vector3.Distance(b.transform.position, building.transform.position)));
             int assigned = 0;
+            // 第一轮：只分配完全空闲的工人，避免打断已在采集的工人
             foreach (var u in candidates)
             {
                 if (assigned >= GameConfig.MaxBuildersPerBuilding) break;
                 var w = u.GetComponent<Worker>();
                 if (w == null) continue;
                 if (team == playerTeam && !w.CanAutoBuild) continue;
-                if (team != playerTeam && w.state != Worker.State.Idle)
-                    w.StopGather();
                 if (w.state != Worker.State.Idle) continue;
                 w.BuildAt(building);
                 assigned++;
+            }
+            // 第二轮（AI 专用）：若建筑工人严重不足，才打断最近的采集工人
+            if (team != playerTeam && assigned == 0 && building.BuilderCount == 0)
+            {
+                foreach (var u in candidates)
+                {
+                    if (assigned >= GameConfig.MaxBuildersPerBuilding) break;
+                    var w = u.GetComponent<Worker>();
+                    if (w == null || w.state == Worker.State.Idle) continue;
+                    w.StopGather();
+                    if (w.state != Worker.State.Idle) continue;
+                    w.BuildAt(building);
+                    assigned++;
+                }
             }
         }
 
