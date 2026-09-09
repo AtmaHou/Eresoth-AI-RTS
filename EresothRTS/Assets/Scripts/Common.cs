@@ -129,6 +129,8 @@ namespace Eresoth
         public static float AiAssaultInterval => RuntimeConfig.Data.aiAssaultInterval;
         public static int AiMinAssaultForce => RuntimeConfig.Data.aiMinAssaultForce;
         public static int AiMaxAssaultForce => RuntimeConfig.Data.aiMaxAssaultForce;
+        public static float AiDecisionInterval => RuntimeConfig.Data.aiDecisionInterval;
+        public static int AiMaxWorkers => RuntimeConfig.Data.aiMaxWorkers;
         public static int BasePop => RuntimeConfig.Data.basePop;
         public static int HousePop => RuntimeConfig.Data.housePop;
         public static int MaxPopCap => RuntimeConfig.Data.maxPopCap;

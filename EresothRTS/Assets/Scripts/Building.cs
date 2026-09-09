@@ -158,7 +158,9 @@ namespace Eresoth
             if (queue.Count >= GameConfig.MaxProductionQueue) { if (team == g.playerTeam) g.Toast("生产队列已满"); return false; }
             if (g.PopCount((int)team) + unitDef.pop > g.PopCap(team))
             { if (team == g.playerTeam) g.Toast("人口已达上限（建民居可提升）"); return false; }
-            if (unitDef.hero && g.units.Exists(u => u.team == team && u.def.hero))
+            // 英雄同时只能有一位：场上存在或已在任一建筑训练队列中都拒绝（死亡移除后可再训）
+            if (unitDef.hero && (g.units.Exists(u => u.team == team && u.def.hero)
+                || g.buildings.Exists(b => b.team == team && b.queue.Exists(d => d.hero))))
             { if (team == g.playerTeam) g.Toast("英雄只能同时存在一位"); return false; }
             if (!g.TrySpend((int)team, unitDef.wood, unitDef.mana)) return false;
             queue.Add(unitDef);

@@ -181,12 +181,14 @@ namespace Eresoth
                     {
                         var d = defs[i];
                         string cost = d.mana > 0 ? $"{d.wood}木+{d.mana}矿" : $"{d.wood}木";
-                        bool heroAlive = d.hero && g.units.Exists(u => u.team == b.team && u.def.hero);
+                        // 英雄同时只能有一位：场上存在或已在训练队列中都置灰（死亡后可再训）
+                        bool heroBusy = d.hero && (g.units.Exists(u => u.team == b.team && u.def.hero)
+                            || g.buildings.Exists(x => x.team == b.team && x.queue.Exists(q => q.hero)));
                         string label = d.hero ? $"{d.name}★ ({cost})" : $"{d.name} ({cost})";
                         var unitDef = d;
                         Btn(new Rect(16 + i * 180, y + 30, 170, 30), label,
                             () => b.TryTrain(unitDef),
-                            !heroAlive && g.wood[bi] >= d.wood && g.mana[bi] >= d.mana);
+                            !heroBusy && g.wood[bi] >= d.wood && g.mana[bi] >= d.mana);
                     }
 
                     // 研究按钮（BuildingDef.techs）：研究中显示进度，满级置灰

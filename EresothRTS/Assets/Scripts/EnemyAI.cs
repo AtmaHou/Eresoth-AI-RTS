@@ -3,14 +3,22 @@ using UnityEngine;
 
 namespace Eresoth
 {
-    /// <summary>第一阶段脚本 AI：采集 → 建军 → 攀科技 → 针对性暴兵（含英雄）→ 分波进攻。
-    /// 战术行为：基地遇袭全军回防、骑兵骚扰采集工人、按玩家兵种构成出克制兵种、
-    /// 玩家基地有重兵时先打部队。后续将被"执行体 AI + LLM 参谋"双层结构替换（设计文档 5.1）。</summary>
+    /// <summary>第一阶段脚本 AI：采集 → 建军 → 攀科技 → 按克制配比持续暴兵（含英雄）→ 集结成波 → 多轮进攻。
+    /// 波次管理：兵力到阈值即集结一波压上；进攻中新兵持续增援；残部回撤重整后再起下一波，规模逐波递增；
+    /// 目标被摧毁后自动续打最近玩家建筑，保证持续多轮进攻压力。
+    /// 兵种搭配：目标编制 = 基础配比（步:弓:骑 ≈ .38:.32:.30）按玩家兵种构成向克制兵种偏移
+    /// （步克骑、弓克步、骑克弓），每类限幅 15%~55% 保持混合编制；缺口最大的兵种优先且豁免经济门槛。
+    /// 战术行为：基地遇袭全军回防、集结期派 2 骑兵骚扰暴露的采集工人。
+    /// 后续将被"执行体 AI + LLM 参谋"双层结构替换（设计文档 5.1）。</summary>
     public class EnemyAI : MonoBehaviour
     {
         float t;
-        int wave;
-        float assaultCooldown;
+        int wave;                        // 已发起的进攻波次（决定下一波规模）
+        float assaultCooldown;           // 波次间隔冷却
+        bool assaulting;                 // true=进攻阶段（已压上），false=集结阶段
+        float assaultTimer;              // 本波进攻已进行时长
+        ITargetable assaultTarget;       // 本波目标
+        Vector3 rally;                   // 集结点：主基地通往玩家方向的缓冲带
 
         // AI 阵营 = 玩家的对手方；其兵种/建筑按该阵营种族取对应定义
         static Team Ai => Game.I.playerTeam == Team.Player ? Team.Enemy : Team.Player;
@@ -24,7 +32,7 @@ namespace Eresoth
             t -= Time.deltaTime;
             assaultCooldown -= Time.deltaTime;
             if (t > 0) return;
-            t = 2f; // 每 2 秒一轮决策
+            t = GameConfig.AiDecisionInterval; // 每 2 秒一轮决策
 
             var ai = Ai;
             int aiIdx = (int)ai;
@@ -48,12 +56,18 @@ namespace Eresoth
             var atkTech = humanSide ? "human_atk" : "undead_atk";
             var defTech = humanSide ? "human_def" : "undead_def";
 
+            // 集结点：主基地朝向玩家一侧 10 格
+            var pHall0 = g.Hall(g.playerTeam);
+            Vector3 toPlayer = pHall0 != null ? pHall0.transform.position - hall.transform.position : Vector3.forward;
+            toPlayer.y = 0;
+            rally = hall.transform.position + (toPlayer.sqrMagnitude > .01f ? toPlayer.normalized : Vector3.forward) * 10f;
+
             // 1. 采集分配：根据当前库存与后续建造/训练需求动态调整 wood/mana 比例
             AssignGatherers(g, ai, aiIdx, humanSide, infB, rngB, cavB);
 
-            // 2. 补工人
+            // 2. 补工人（上限取自配置）
             int workerCount = g.units.FindAll(u => IsAi(u) && u.def.worker).Count;
-            if (workerCount < 8) hall.TryTrain(workerDef);
+            if (workerCount < GameConfig.AiMaxWorkers) hall.TryTrain(workerDef);
 
             // 3. 建筑顺序：兵种建筑 → 资源收集站分矿 → 民居（人口快满时）
             if (g.BuildingOfKind(ai, infKind) == null
@@ -102,34 +116,49 @@ namespace Eresoth
                 if (d > 26f && d > loneD) { loneD = d; loneWorker = u; }
             }
 
-            // 威胁最大的玩家兵种 ≥4 时，优先训练克制兵种（步克骑、弓克步、骑克弓）
-            UnitKind focus = UnitKind.Infantry; int top = pInf;
-            if (pRng > top) { focus = UnitKind.Ranged; top = pRng; }
-            if (pCav > top) { focus = UnitKind.Cavalry; top = pCav; }
-            // focus 是"威胁最大的兵种"，克制方 = 被威胁方反过来：玩家远程多→我爆骑兵 等
-            UnitKind counter = focus == UnitKind.Ranged ? UnitKind.Cavalry
-                : focus == UnitKind.Cavalry ? UnitKind.Infantry : UnitKind.Ranged;
-            bool counterMode = top >= 4;
+            // 本波规模：逐波递增直至上限（wave 在每次发起进攻时 +1）
+            int need = Mathf.Min(GameConfig.AiMaxAssaultForce,
+                GameConfig.AiMinAssaultForce + wave * 2);
 
-            // 6. 暴兵：克制模式下只出克制兵种；平时步:弓:骑 ≈ 3:2:2（步兵兵营富余时训练英雄，全场唯一）
+            // 6. 持续暴兵：目标编制 = 克制配比 × 本波规模，按各类缺口训练（混合搭配 + 战损补充 + 针对玩家）
+            var rng = g.BuildingOfKind(ai, rngKind);
+            var cav = g.BuildingOfKind(ai, cavKind);
+            {
+                int aInf = 0, aRng = 0, aCav = 0;
+                foreach (var u in g.units)
+                {
+                    if (!IsAi(u) || u.def.worker) continue;
+                    if (u.def.kind == UnitKind.Infantry) aInf++;
+                    else if (u.def.kind == UnitKind.Ranged) aRng++;
+                    else if (u.def.kind == UnitKind.Cavalry) aCav++;
+                }
+
+                // 期望配比（x=步 y=弓 z=骑），只对已建军营的兵种归一
+                Vector3 w = DesiredComp(pInf, pRng, pCav);
+                float wInf = inf != null ? w.x : 0f, wRng = rng != null ? w.y : 0f, wCav = cav != null ? w.z : 0f;
+                float wSum = wInf + wRng + wCav;
+                if (wSum <= 0f)   // 兵营全无（理论兜底）：平均分给将有的
+                { wInf = inf != null ? 1f : 0f; wRng = rng != null ? 1f : 0f; wCav = cav != null ? 1f : 0f; wSum = wInf + wRng + wCav; }
+
+                // 各类缺口（目标数 - 现有数）；缺口 ≥1 才训练，天然控制混合比例
+                float dInf = wInf / wSum * need - aInf;
+                float dRng = wRng / wSum * need - aRng;
+                float dCav = wCav / wSum * need - aCav;
+                // 缺口最大者 = 当前最急需的克制兵种，豁免经济门槛；其余保留门槛防早期断矿
+                if (dInf >= 1f) inf.TryTrain(infUnit);
+                if (rng != null && dRng >= 1f && (dRng >= dInf && dRng >= dCav || g.mana[aiIdx] > 80))
+                    rng.TryTrain(rngUnit);
+                if (cav != null && dCav >= 1f && (dCav >= dInf && dCav >= dRng || g.mana[aiIdx] > 140))
+                    cav.TryTrain(cavUnit);
+            }
+
+            // 英雄：场上或队列中都没有时才训练（全场唯一，死亡后可再训）
             if (inf != null)
             {
-                if (!counterMode || counter == UnitKind.Infantry) inf.TryTrain(infUnit);
-                bool heroAlive = g.units.Exists(u => IsAi(u) && u.def.hero);
-                if (!heroAlive && g.wood[aiIdx] > heroUnit.wood + 100 && g.mana[aiIdx] > heroUnit.mana)
+                bool heroBusy = g.units.Exists(u => IsAi(u) && u.def.hero)
+                    || g.buildings.Exists(b => b.team == ai && b.queue.Exists(d => d.hero));
+                if (!heroBusy && g.wood[aiIdx] > heroUnit.wood + 100 && g.mana[aiIdx] > heroUnit.mana)
                     inf.TryTrain(heroUnit);
-            }
-            var rng = g.BuildingOfKind(ai, rngKind);
-            if (rng != null && g.mana[aiIdx] > 80 && (!counterMode || counter == UnitKind.Ranged))
-            {
-                int ranged = g.units.FindAll(u => IsAi(u) && u.def.kind == UnitKind.Ranged).Count;
-                if (ranged * 3 < ArmyCount(g)) rng.TryTrain(rngUnit);
-            }
-            var cav = g.BuildingOfKind(ai, cavKind);
-            if (cav != null && g.mana[aiIdx] > 140 && (!counterMode || counter == UnitKind.Cavalry))
-            {
-                int count = g.units.FindAll(u => IsAi(u) && u.def.kind == UnitKind.Cavalry).Count;
-                if (count * 3 < ArmyCount(g)) cav.TryTrain(cavUnit);
             }
 
             var force = g.units.FindAll(u => IsAi(u) && !u.def.worker);
@@ -148,24 +177,109 @@ namespace Eresoth
                 return;   // 每 2 秒重评估，入侵者清完自然回落到原逻辑
             }
 
-            // 8. 骚扰：有 ≥2 骑兵时，派最近的 2 个去杀暴露在外的采集工人
-            if (loneWorker != null)
+            if (!assaulting)
             {
-                var raiders = force.FindAll(u => u.def.kind == UnitKind.Cavalry);
-                if (raiders.Count >= 2)
+                // 8a. 集结：把基地附近的散兵拢到集结点成波（到达后 hasMoveOrder 自动清除，等待出兵）
+                foreach (var u in force)
                 {
-                    raiders.Sort((a, b) =>
-                        Vector3.Distance(a.transform.position, loneWorker.transform.position)
-                        .CompareTo(Vector3.Distance(b.transform.position, loneWorker.transform.position)));
-                    raiders[0].CommandAttack(loneWorker);
-                    raiders[1].CommandAttack(loneWorker);
+                    if (u.target != null || u.busy) continue;
+                    if (Vector3.Distance(u.transform.position, rally) > 5f)
+                        u.CommandMove(rally + Jitter(3f));
+                }
+
+                // 8b. 骚扰（仅集结期）：派最近的 2 个骑兵杀暴露在外的采集工人
+                if (loneWorker != null)
+                {
+                    var raiders = force.FindAll(u => u.def.kind == UnitKind.Cavalry);
+                    if (raiders.Count >= 2)
+                    {
+                        raiders.Sort((a, b) =>
+                            Vector3.Distance(a.transform.position, loneWorker.transform.position)
+                            .CompareTo(Vector3.Distance(b.transform.position, loneWorker.transform.position)));
+                        raiders[0].CommandAttack(loneWorker);
+                        raiders[1].CommandAttack(loneWorker);
+                    }
+                }
+
+                // 8c. 出兵：兵力到阈值且冷却结束即压上一波
+                if (force.Count >= need && assaultCooldown <= 0f)
+                {
+                    var tgt = PickTarget(g, ai, force, pHall);
+                    if (tgt != null)
+                    {
+                        assaulting = true;
+                        assaultTimer = 0f;
+                        assaultTarget = tgt;
+                        wave++;
+                        foreach (var u in force) u.CommandAttack(tgt);
+                    }
                 }
             }
+            else
+            {
+                // 9a. 目标失效 → 续打离集结点最近的玩家成品建筑（保证多轮连续施压）
+                if (assaultTarget == null || !assaultTarget.Alive)
+                    assaultTarget = NextAssaultTarget(g, ai);
+                // 9b. 增援与续攻：交战中的不打断；基地附近新兵/残部统一指向本波目标
+                if (assaultTarget != null)
+                    foreach (var u in force)
+                    {
+                        if (u.target != null && u.target.Alive) continue;
+                        u.CommandAttack(assaultTarget);
+                    }
+                // 9c. 撤退：进攻超过 8 秒后，"仍在战场"（正在交战或已远离基地推进）的兵力
+                //     不足本波 1/3，或一波拖超过 60 秒，则残部回撤集结点，冷却后再起下一波
+                assaultTimer += GameConfig.AiDecisionInterval;
+                if (assaultTimer > 8f)
+                {
+                    int inField = 0;
+                    foreach (var u in force)
+                        if ((u.target != null && u.target.Alive)
+                            || Vector3.Distance(u.transform.position, hall.transform.position) > 30f) inField++;
+                    if (inField <= Mathf.Max(2, need / 3) || assaultTimer > 60f)
+                    {
+                        assaulting = false;
+                        assaultCooldown = GameConfig.AiAssaultInterval;
+                        assaultTarget = null;
+                        foreach (var u in force) u.CommandMove(rally + Jitter(3f));
+                    }
+                }
+            }
+        }
 
-            // 9. 兵力到阈值就压一波，每波规模递增；若玩家基地附近有重兵，先打部队而非直冲主基地
-            int need = Mathf.Min(GameConfig.AiMaxAssaultForce,
-                GameConfig.AiMinAssaultForce + (wave % 4) * 2);
-            if (pHall != null && force.Count >= need && assaultCooldown <= 0f)
+        // 集结/撤退时的分散落点，避免叠成一个点
+        static Vector3 Jitter(float r)
+        {
+            var c = Random.insideUnitCircle * r;
+            return new Vector3(c.x, 0, c.y);
+        }
+
+        /// <summary>期望兵种配比（x=步 y=弓 z=骑）：基础 .38/.32/.30，按玩家兵种构成向克制兵种偏移
+        /// （步克骑、弓克步、骑克弓，玩家某类 ≥3 才启用），每类限幅 15%~55% 保持混合编制。</summary>
+        static Vector3 DesiredComp(int pInf, int pRng, int pCav)
+        {
+            Vector3 w = new(.38f, .32f, .30f);
+            float total = pInf + pRng + pCav;
+            if (total >= 3f)
+            {
+                const float pull = .8f;
+                w.x += pull * pCav / total;   // 玩家骑兵多 → 补步兵（步克骑）
+                w.y += pull * pInf / total;   // 玩家步兵多 → 补远程（弓克步）
+                w.z += pull * pRng / total;   // 玩家远程多 → 补骑兵（骑克弓）
+            }
+            w.x = Mathf.Clamp(w.x, .15f, .55f);
+            w.y = Mathf.Clamp(w.y, .15f, .55f);
+            w.z = Mathf.Clamp(w.z, .15f, .55f);
+            return w / (w.x + w.y + w.z);
+        }
+
+        /// <summary>本波首发目标：优先打玩家资源收集站（兵力 <14 时），其次清玩家主基地附近的守军
+        /// （≥4 人时），否则直冲主基地；主基地已灭则改打最近玩家建筑。</summary>
+        ITargetable PickTarget(Game g, Team ai, List<Unit> force, Building pHall)
+        {
+            var enemyHub = g.buildings.Find(b => b.team == g.playerTeam && b.kind == "resource_hub" && !b.constructing);
+            if (enemyHub != null && force.Count < 14) return enemyHub;
+            if (pHall != null)
             {
                 Unit nearDef = null; float nd = 22f;
                 foreach (var u in g.units)
@@ -174,13 +288,23 @@ namespace Eresoth
                     float d = Vector3.Distance(u.transform.position, pHall.transform.position);
                     if (d < nd) { nd = d; nearDef = u; }
                 }
-                wave++;
-                var enemyHub = g.buildings.Find(b => b.team == g.playerTeam && b.kind == "resource_hub" && !b.constructing);
-                ITargetable tgt = enemyHub != null && force.Count < 14 ? enemyHub
-                    : nearDef != null && CountNear(pHall.transform.position, 22f) >= 4 ? nearDef : pHall;
-                foreach (var u in force) u.CommandAttack(tgt);
-                assaultCooldown = GameConfig.AiAssaultInterval;
+                if (nearDef != null && CountNear(pHall.transform.position, 22f) >= 4) return nearDef;
+                return pHall;
             }
+            return NextAssaultTarget(g, ai);
+        }
+
+        /// <summary>当前目标被摧毁后的续攻目标：离集结点最近的玩家成品建筑；无则 null（由 CheckEnd 收场）。</summary>
+        ITargetable NextAssaultTarget(Game g, Team ai)
+        {
+            Building best = null; float bd = float.MaxValue;
+            foreach (var b in g.buildings)
+            {
+                if (b.team == ai || b.constructing) continue;
+                float d = Vector3.Distance(b.transform.position, rally);
+                if (d < bd) { bd = d; best = b; }
+            }
+            return best;
         }
 
         // 玩家战斗单位在 pos 半径内的数量
@@ -264,8 +388,5 @@ namespace Eresoth
             var cavB = humanSide ? GameConfig.Stable : GameConfig.DeathStable;
             AssignGatherers(g, ai, aiIdx, humanSide, infB, rngB, cavB);
         }
-
-        // 战斗兵种总数（不含工人），用于 步:弓:骑 ≈ 3:2:2 的比例控制
-        static int ArmyCount(Game g) => g.units.FindAll(u => IsAi(u) && !u.def.worker).Count;
     }
 }

@@ -1,0 +1,424 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e861979a2f41a8a438200638555e1145, type: 3}
+  m_Name: EresothRTSConfig
+  m_EditorClassIdentifier:
+  initialWood: 70
+  initialMana: 180
+  aiHardBonusWood: 90
+  aiHardBonusMana: 180
+  aiHardGatherMultiplier: 1.35
+  gatherAmount: 8
+  gatherTime: 2
+  trainTime: 2.5
+  maxProductionQueue: 5
+  constructionTime: 8
+  maxBuildersPerBuilding: 3
+  constructionDamageMultiplier: 2
+  counterBonus: 1.5
+  splashFrac: 0.5
+  heroCap: 1
+  basePop: 40
+  housePop: 15
+  maxPopCap: 100
+  aiAssaultInterval: 18
+  aiMinAssaultForce: 6
+  aiMaxAssaultForce: 12
+  aiDecisionInterval: 2
+  aiMaxWorkers: 12
+  aiWorkerReassignIdleFrames: 3
+  woodPrice: 1
+  manaPrice: 1
+  resourceShortageRatio: 0.35
+  aiSpendHistorySeconds: 12
+  units:
+  - id: farmer
+    name: 农夫
+    kind: 0
+    hp: 45
+    dmg: 3
+    range: 1.2
+    speed: 5.5
+    cooldown: 1
+    aggro: 0
+    size: 0.8
+    wood: 10
+    mana: 40
+    pop: 1
+    worker: 1
+    hero: 0
+    auraRadius: 0
+    auraBonus: 0
+    aoeRadius: 0
+    color: {r: 0.85, g: 0.75, b: 0.55, a: 1}
+    prefab: {fileID: 0}
+  - id: footman
+    name: 步兵
+    kind: 1
+    hp: 110
+    dmg: 10
+    range: 1.6
+    speed: 5
+    cooldown: 1.1
+    aggro: 9
+    size: 0.95
+    wood: 10
+    mana: 50
+    pop: 1
+    worker: 0
+    hero: 0
+    auraRadius: 0
+    auraBonus: 0
+    aoeRadius: 0
+    color: {r: 0.55, g: 0.65, b: 0.95, a: 1}
+    prefab: {fileID: 0}
+  - id: archer
+    name: 长弓手
+    kind: 2
+    hp: 65
+    dmg: 12
+    range: 9
+    speed: 5
+    cooldown: 1.2
+    aggro: 10
+    size: 0.85
+    wood: 10
+    mana: 50
+    pop: 1
+    worker: 0
+    hero: 0
+    auraRadius: 0
+    auraBonus: 0
+    aoeRadius: 0
+    color: {r: 0.45, g: 0.85, b: 0.55, a: 1}
+    prefab: {fileID: 0}
+  - id: knight
+    name: 骑士
+    kind: 3
+    hp: 170
+    dmg: 17
+    range: 1.8
+    speed: 7.5
+    cooldown: 1.3
+    aggro: 9
+    size: 1.15
+    wood: 30
+    mana: 90
+    pop: 2
+    worker: 0
+    hero: 0
+    auraRadius: 0
+    auraBonus: 0
+    aoeRadius: 0
+    color: {r: 0.9, g: 0.85, b: 0.4, a: 1}
+    prefab: {fileID: 0}
+  - id: acolyte
+    name: 侍僧
+    kind: 0
+    hp: 40
+    dmg: 3
+    range: 1.2
+    speed: 5.5
+    cooldown: 1
+    aggro: 0
+    size: 0.8
+    wood: 10
+    mana: 40
+    pop: 1
+    worker: 1
+    hero: 0
+    auraRadius: 0
+    auraBonus: 0
+    aoeRadius: 0
+    color: {r: 0.5, g: 0.4, b: 0.55, a: 1}
+    prefab: {fileID: 0}
+  - id: skeleton
+    name: 骷髅兵
+    kind: 1
+    hp: 100
+    dmg: 9
+    range: 1.5
+    speed: 5
+    cooldown: 1
+    aggro: 9
+    size: 0.85
+    wood: 5
+    mana: 45
+    pop: 1
+    worker: 0
+    hero: 0
+    auraRadius: 0
+    auraBonus: 0
+    aoeRadius: 0
+    color: {r: 0.9, g: 0.9, b: 0.85, a: 1}
+    prefab: {fileID: 0}
+  - id: darkarcher
+    name: 亡灵射手
+    kind: 2
+    hp: 60
+    dmg: 11
+    range: 9
+    speed: 5
+    cooldown: 1.2
+    aggro: 10
+    size: 0.85
+    wood: 10
+    mana: 50
+    pop: 1
+    worker: 0
+    hero: 0
+    auraRadius: 0
+    auraBonus: 0
+    aoeRadius: 0
+    color: {r: 0.65, g: 0.45, b: 0.85, a: 1}
+    prefab: {fileID: 0}
+  - id: deathknight
+    name: 死亡骑士
+    kind: 3
+    hp: 160
+    dmg: 16
+    range: 1.8
+    speed: 7.5
+    cooldown: 1.3
+    aggro: 9
+    size: 1.15
+    wood: 30
+    mana: 90
+    pop: 2
+    worker: 0
+    hero: 0
+    auraRadius: 0
+    auraBonus: 0
+    aoeRadius: 0
+    color: {r: 0.55, g: 0.6, b: 0.7, a: 1}
+    prefab: {fileID: 0}
+  - id: lordknight
+    name: 骑士团长
+    kind: 3
+    hp: 650
+    dmg: 34
+    range: 2.2
+    speed: 7.5
+    cooldown: 1.2
+    aggro: 10
+    size: 1.5
+    wood: 100
+    mana: 300
+    pop: 3
+    worker: 0
+    hero: 1
+    auraRadius: 10
+    auraBonus: 0.25
+    aoeRadius: 3
+    color: {r: 1, g: 0.92, b: 0.45, a: 1}
+    prefab: {fileID: 0}
+  - id: deathranger
+    name: 霜骨巫妖
+    kind: 2
+    hp: 520
+    dmg: 30
+    range: 10
+    speed: 5.5
+    cooldown: 1.1
+    aggro: 11
+    size: 1.1
+    wood: 100
+    mana: 300
+    pop: 3
+    worker: 0
+    hero: 1
+    auraRadius: 10
+    auraBonus: 0.25
+    aoeRadius: 2.5
+    color: {r: 0.85, g: 0.55, b: 1, a: 1}
+    prefab: {fileID: 0}
+  buildings:
+  - kind: hall
+    name: 主基地
+    wood: 0
+    mana: 0
+    hp: 1500
+    size: 5
+    trainUnitIds: []
+    techIds: []
+    atk: 0
+    atkRange: 0
+    atkCd: 0
+    prefab: {fileID: 0}
+  - kind: barracks
+    name: 兵营
+    wood: 50
+    mana: 100
+    hp: 800
+    size: 3.6
+    trainUnitIds:
+    - footman
+    - lordknight
+    techIds:
+    - human_atk
+    - human_def
+    atk: 0
+    atkRange: 0
+    atkCd: 0
+    prefab: {fileID: 0}
+  - kind: archery
+    name: 弓箭场
+    wood: 40
+    mana: 110
+    hp: 700
+    size: 3.2
+    trainUnitIds:
+    - archer
+    techIds: []
+    atk: 0
+    atkRange: 0
+    atkCd: 0
+    prefab: {fileID: 0}
+  - kind: stable
+    name: 马厩
+    wood: 50
+    mana: 140
+    hp: 800
+    size: 3.6
+    trainUnitIds:
+    - knight
+    techIds: []
+    atk: 0
+    atkRange: 0
+    atkCd: 0
+    prefab: {fileID: 0}
+  - kind: resource_hub
+    name: 资源收集站
+    wood: 30
+    mana: 80
+    hp: 600
+    size: 3
+    trainUnitIds: []
+    techIds: []
+    atk: 0
+    atkRange: 0
+    atkCd: 0
+    prefab: {fileID: 0}
+  - kind: tower
+    name: 箭塔
+    wood: 20
+    mana: 80
+    hp: 350
+    size: 2.6
+    trainUnitIds: []
+    techIds: []
+    atk: 12
+    atkRange: 11
+    atkCd: 1
+    prefab: {fileID: 0}
+  - kind: house
+    name: 民居
+    wood: 20
+    mana: 70
+    hp: 400
+    size: 3
+    trainUnitIds: []
+    techIds: []
+    atk: 0
+    atkRange: 0
+    atkCd: 0
+    prefab: {fileID: 0}
+  - kind: crypt
+    name: 地穴
+    wood: 50
+    mana: 100
+    hp: 800
+    size: 3.6
+    trainUnitIds:
+    - skeleton
+    - deathranger
+    techIds:
+    - undead_atk
+    - undead_def
+    atk: 0
+    atkRange: 0
+    atkCd: 0
+    prefab: {fileID: 0}
+  - kind: dark_temple
+    name: 诅咒神殿
+    wood: 40
+    mana: 110
+    hp: 700
+    size: 3.2
+    trainUnitIds:
+    - darkarcher
+    techIds: []
+    atk: 0
+    atkRange: 0
+    atkCd: 0
+    prefab: {fileID: 0}
+  - kind: death_stable
+    name: 死亡马厩
+    wood: 50
+    mana: 140
+    hp: 800
+    size: 3.6
+    trainUnitIds:
+    - deathknight
+    techIds: []
+    atk: 0
+    atkRange: 0
+    atkCd: 0
+    prefab: {fileID: 0}
+  techs:
+  - id: human_atk
+    name: 利刃淬炼
+    desc: 全军攻击 +15%
+    wood: 50
+    mana: 100
+    time: 20
+    maxLevel: 2
+    effect: 0
+  - id: human_def
+    name: 坚壁工事
+    desc: 全军受伤减免约 13%
+    wood: 50
+    mana: 100
+    time: 20
+    maxLevel: 2
+    effect: 1
+  - id: undead_atk
+    name: 白骨磨锋
+    desc: 全军攻击 +15%
+    wood: 50
+    mana: 100
+    time: 20
+    maxLevel: 2
+    effect: 0
+  - id: undead_def
+    name: 腐躯硬化
+    desc: 全军受伤减免约 13%
+    wood: 50
+    mana: 100
+    time: 20
+    maxLevel: 2
+    effect: 1
+  factionBuildings:
+    humanBuildingKinds:
+    - barracks
+    - archery
+    - stable
+    - resource_hub
+    - tower
+    - house
+    undeadBuildingKinds:
+    - crypt
+    - dark_temple
+    - death_stable
+    - resource_hub
+    - tower
+    - house

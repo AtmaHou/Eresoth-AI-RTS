@@ -17,17 +17,18 @@ namespace Eresoth
         {
             var rig = new BodyRig { root = v };
             bool h = Human(team);
-            if (def.worker) BuildWorker(rig, def, h);
+            if (def.hero)
+            {
+                // 英雄走专属全身构建（不与普通兵种分支叠加，避免重复马体/武器）
+                if (h) BuildLordKnightHero(rig, def);
+                else BuildLichHero(rig, def);
+            }
+            else if (def.worker) BuildWorker(rig, def, h);
             else switch (def.kind)
             {
                 case UnitKind.Infantry: BuildInfantry(rig, def, h); break;
                 case UnitKind.Ranged:   BuildRanged(rig, def, h); break;
                 case UnitKind.Cavalry:  BuildCavalry(rig, def, h); break;
-            }
-            if (def.hero)
-            {
-                if (h) BuildLordKnightHero(rig, def);
-                else BuildLichHero(rig, def);
             }
             // 动画基准快照（突刺复位 / 魂核脉动 / 碎片浮动都基于快照，绝不每帧累加）
             if (rig.armR != null) rig.armRHome = rig.armR.localPosition;
