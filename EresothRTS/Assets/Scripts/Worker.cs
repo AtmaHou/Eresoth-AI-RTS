@@ -56,7 +56,13 @@ namespace Eresoth
                         node.amount -= amt;
                         carry = amt;
                         UnitVfx.PlayGatherEffect(u, curKind);   // 采集反馈（纯视觉，不改数值）
-                        if (node.amount <= 0) { var dead = node; node = null; Destroy(dead.gameObject); }
+                        if (node.amount <= 0)
+                        {
+                            var dead = node; node = null;
+                            GameEventBus.Publish(GameEventType.ResourceDepleted, u.team, dead.transform.position,
+                                EventSeverity.Warning, dead.kind, dead.kind == "mana" ? "一处魔法矿已枯竭" : "一片树林已砍完");
+                            Destroy(dead.gameObject);
+                        }
                         state = State.Returning;
                     }
                     break;

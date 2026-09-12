@@ -11,8 +11,14 @@ namespace Eresoth
     {
         SelectionManager sel;
         GUIStyle mid, big;
+        bool showCommandPanel;   // F9：指挥调试面板（军团状态 + 事件战报）
 
         void Start() { sel = GetComponent<SelectionManager>(); }
+
+        void Update()
+        {
+            if (Input.GetKeyDown(KeyCode.F9)) showCommandPanel = !showCommandPanel;
+        }
 
         void EnsureStyles()
         {
@@ -75,7 +81,7 @@ namespace Eresoth
             GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), Texture2D.whiteTexture);
             GUI.color = Color.white;
 
-            float w = 520, h = 420;
+            float w = 520, h = 452;
             var r = new Rect((Screen.width - w) / 2f, (Screen.height - h) / 2f, w, h);
             GUI.Box(r, GUIContent.none);
             GUI.Label(new Rect(r.x, r.y + 16, r.width, 40), "厄瑞索斯 RTS", big);
@@ -123,7 +129,14 @@ namespace Eresoth
             GUI.Label(new Rect(r.x + 235, r.y + 306, 240, 24),
                 MapSettings.difficulty == Difficulty.Hard ? "AI 经济加成 +35%" : "AI 标准经济与压力", mid);
 
-            Btn(new Rect(r.x + 140, r.y + 360, 200, 42), "开 始 游 戏", () => g.StartGame(), true);
+            // 演示模式：开局自带兵力与建筑，AI 更激进——快速验证文字指挥
+            Btn(new Rect(r.x + 50, r.y + 344, 170, 32),
+                $"演示模式：{(MapSettings.demoMode ? "开" : "关")}",
+                () => MapSettings.demoMode = !MapSettings.demoMode, true);
+            GUI.Label(new Rect(r.x + 235, r.y + 348, 260, 24),
+                MapSettings.demoMode ? "开局带12兵+2兵营，直接打字指挥" : "标准开局", mid);
+
+            Btn(new Rect(r.x + 140, r.y + 384, 200, 42), "开 始 游 戏", () => g.StartGame(), true);
         }
 
         void DrawBottom()
@@ -253,9 +266,15 @@ namespace Eresoth
         {
             var g = Game.I;
             foreach (var u in g.units)
+            {
+                if (u.team != g.playerTeam && !FogOfWarManager.VisibleToPlayer(u.transform.position)) continue;
                 Bar(u.transform.position, 34 * u.def.size, u.Hp01, u.team == g.playerTeam, u.def.size * 2.6f);
+            }
             foreach (var b in g.buildings)
+            {
+                if (b.team != g.playerTeam && !FogOfWarManager.VisibleToPlayer(b.transform.position)) continue;
                 Bar(b.transform.position, 60, b.Hp01, b.team == g.playerTeam, b.kind == "hall" ? 6f : 4f);
+            }
         }
 
         void Bar(Vector3 world, float w, float h01, bool friendly, float yOff)

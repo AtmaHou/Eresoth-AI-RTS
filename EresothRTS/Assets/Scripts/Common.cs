@@ -106,6 +106,11 @@ namespace Eresoth
         public static int mapSizeIndex = 1;           // 0=小 1=标准 2=大
         public static VictoryMode victoryMode = VictoryMode.MainBase;
         public static Difficulty difficulty = Difficulty.Normal;
+        /// <summary>演示模式：开局自带兵力/建筑/双倍资源并自动编组，AI 进攻更激进——用于快速验证文字指挥效果。</summary>
+        public static bool demoMode = false;
+        /// <summary>战争迷雾：开 = 魔兽式双重迷雾（未探索全黑/已探索半暗/可见清晰），
+        /// 参谋与触发器只感知看得见的敌人；关 = 全图可见（旧行为）。</summary>
+        public static bool fogOfWar = true;
         public static readonly string[] RichnessNames = { "贫瘠", "标准", "富饶" };
         public static readonly float[] RichnessValues = { 0.6f, 1f, 1.8f };  // 资源点数量乘区
         public static readonly string[] MapSizeNames = { "小型", "标准", "大型" };

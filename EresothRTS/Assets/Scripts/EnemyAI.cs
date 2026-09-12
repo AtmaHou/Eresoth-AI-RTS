@@ -119,6 +119,7 @@ namespace Eresoth
             // 本波规模：逐波递增直至上限（wave 在每次发起进攻时 +1）
             int need = Mathf.Min(GameConfig.AiMaxAssaultForce,
                 GameConfig.AiMinAssaultForce + wave * 2);
+            if (MapSettings.demoMode) need = Mathf.Max(4, need - 2);   // 演示模式：首波更早到场
 
             // 6. 持续暴兵：目标编制 = 克制配比 × 本波规模，按各类缺口训练（混合搭配 + 战损补充 + 针对玩家）
             var rng = g.BuildingOfKind(ai, rngKind);

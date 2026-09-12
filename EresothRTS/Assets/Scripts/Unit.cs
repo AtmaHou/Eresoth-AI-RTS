@@ -12,10 +12,13 @@ namespace Eresoth
         public ITargetable target;          // 当前敌人（单位或建筑）
         public Vector3 movePos;             // 玩家右键目的地
         bool hasMoveOrder;                  // 显式移动期间禁止自动索敌
+        public bool attackMove;             // 攻击移动中：有移动命令但仍允许自动索敌
         public Unit lastAttacker;           // 最近攻击者（AI 军令层用）
         public bool busy;                   // 采集中（由 WorkerAI 维护）
         public int holdSlot = -1;           // 驻守法阵索引（-1 = 非驻守）
         public Transform ring;              // 选中高光圈
+        public string forceId;              // 所属军团 ID（空 = 未编组；由 ForceManager 维护）
+        public float manualOverrideUntil;   // > Time.time 时军团执行体跳过该单位（玩家手动接管期）
 
         float cd;                           // 攻击冷却
         public float stunT;                 // 瘫痪剩余时间（督军锁链）
@@ -64,6 +67,7 @@ namespace Eresoth
 
             Game.I.units.Add(u0);
             if (def.worker) go.AddComponent<Worker>();   // 采集状态机（EnemyAI / 右键采集共用）
+            ForceManager.I?.OnUnitSpawned(u0);           // 新训练单位自动编入军团（战斗单位）
             return u0;
         }
 
@@ -95,6 +99,7 @@ namespace Eresoth
             target = null;
             movePos = p;
             hasMoveOrder = true;
+            attackMove = false;
             var w = GetComponent<Worker>(); if (w != null) w.StopGather();
             busy = false;
         }
@@ -105,6 +110,18 @@ namespace Eresoth
             target = t;
             movePos = t.Pos;
             hasMoveOrder = false;
+            attackMove = false;
+            var w = GetComponent<Worker>(); if (w != null) w.StopGather();
+            busy = false;
+        }
+
+        /// <summary>攻击移动（军令层用）：向目的地推进，途中允许自动索敌接战。</summary>
+        public void CommandAttackMove(Vector3 p)
+        {
+            target = null;
+            movePos = p;
+            hasMoveOrder = true;
+            attackMove = true;
             var w = GetComponent<Worker>(); if (w != null) w.StopGather();
             busy = false;
         }
@@ -119,8 +136,8 @@ namespace Eresoth
             ResolveOverlap();                    // 碰撞体积：单位/建筑间推挤，防穿模
             if (busy) return;   // 采集循环由 WorkerAI 驱动（移动与动画都在 Worker 里）
 
-            // --- 目标决策：缓存目标失效则重寻最近敌（警戒范围） ---
-            if (!hasMoveOrder && (target == null || !target.Alive))
+            // --- 目标决策：缓存目标失效则重寻最近敌（警戒范围）；攻击移动中也允许索敌 ---
+            if ((!hasMoveOrder || attackMove) && (target == null || !target.Alive))
             {
                 target = null;
                 float best = def.aggro;

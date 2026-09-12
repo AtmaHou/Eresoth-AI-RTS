@@ -63,6 +63,15 @@ namespace Eresoth
             gameObject.AddComponent<SelectionManager>();
             enemyAI = gameObject.AddComponent<EnemyAI>();
             gameObject.AddComponent<GameHUD>();
+            // 指挥层组件：军团 / 军令调度 / 战术执行 / 调试命令入口
+            gameObject.AddComponent<ForceManager>();
+            gameObject.AddComponent<OrderDispatcher>();
+            gameObject.AddComponent<ForceController>();
+            gameObject.AddComponent<EconomyPlanner>();
+            gameObject.AddComponent<DebugCommandRunner>();
+            gameObject.AddComponent<CommandConsole>();
+            gameObject.AddComponent<LlmClient>();
+            gameObject.AddComponent<FogOfWarManager>();
         }
 
         /// <summary>开局设置面板确认后调用：按 MapSettings 生成本局世界。</summary>
@@ -70,6 +79,7 @@ namespace Eresoth
         {
             if (started) return;
             started = true;
+            GameEventBus.ClearLog();   // 新一局清空事件日志（场景重载后静态日志仍保留）
             // 阵营在开局面板里选，必须在此时才读取（Awake 早于玩家选择，先读会拿到默认值）
             playerTeam = MapSettings.playerTeam;
             if (MapSettings.difficulty == Difficulty.Hard)
@@ -276,6 +286,53 @@ namespace Eresoth
             // 双方基地：工人按"该阵营所属玩家选择的种族"配置（玩家选了不死则 0 号位用侍僧体系）
             SpawnBase(Team.Player, playerTeam == Team.Player ? GameConfig.Farmer : GameConfig.Acolyte);
             SpawnBase(Team.Enemy, playerTeam == Team.Player ? GameConfig.Acolyte : GameConfig.Farmer);
+
+            // 注册本局地图语义点（"东矿/家门口/中矿"等），供军令层引用
+            SemanticMapRegistrar.Register(this);
+
+            if (MapSettings.demoMode) SetupDemoMode();
+
+            // 战争迷雾：按本局地图尺寸重置并立即刷新（开关关闭时内部自动隐藏迷雾平面）
+            FogOfWarManager.I?.ResetFog();
+        }
+
+        /// <summary>演示模式：开局自带兵力/建筑/双倍资源并自动编组，让文字指挥 3 分钟内进入剧情。</summary>
+        void SetupDemoMode()
+        {
+            int pi = (int)playerTeam;
+            wood[pi] *= 2; mana[pi] *= 2;
+
+            bool humanSide = playerTeam == Team.Player;
+            var c = baseCenter[pi];
+            // 已完工的兵营/弓箭场（经济指令立刻可验证）
+            var barracksDef = humanSide ? GameConfig.Barracks : GameConfig.Crypt;
+            var archeryDef = humanSide ? GameConfig.Archery : GameConfig.DarkTemple;
+            var bp = c + new Vector3(9, 0, 5); bp.y = TerrainHeight(bp.x, bp.z);
+            Building.Spawn(playerTeam, barracksDef, bp, true);
+            var ap = c + new Vector3(-9, 0, 5); ap.y = TerrainHeight(ap.x, ap.z);
+            Building.Spawn(playerTeam, archeryDef, ap, true);
+
+            // 12 个战斗单位（步6/弓4/骑2）
+            var inf = humanSide ? GameConfig.Footman : GameConfig.Skeleton;
+            var rng = humanSide ? GameConfig.Archer : GameConfig.DarkArcher;
+            var cav = humanSide ? GameConfig.Knight : GameConfig.DeathKnight;
+            void Ring(UnitDef def, int n, float radius, float angle0)
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    float a = angle0 + i * 0.7f;
+                    var p = c + new Vector3(Mathf.Cos(a) * radius, 0, Mathf.Sin(a) * radius);
+                    p.y = TerrainHeight(p.x, p.z);
+                    Unit.Spawn(playerTeam, def, p);
+                }
+            }
+            Ring(inf, 6, 10f, 0f);
+            Ring(rng, 4, 12f, 2f);
+            Ring(cav, 2, 14f, 4f);
+
+            // 自动编组（演示模式无需先按 F10）
+            ForceManager.I?.AutoForm(playerTeam);
+            Toast("演示模式：已为你编好两支军团，直接在左下角指挥台打字下令（如：二军团去打东矿，遇到主力就撤）");
         }
 
         // ---------------- 天空 / 地形 / 悬崖 / 装饰 ----------------
@@ -573,6 +630,8 @@ namespace Eresoth
             var t = GameConfig.Techs[techId];
             if (t.effect == TechEffect.Atk) atkLevel[(int)team]++; else defLevel[(int)team]++;
             if (team == playerTeam) Toast($"研究完成：{t.name} Lv{TechLevel(team, t.effect)}");
+            GameEventBus.Publish(GameEventType.TechCompleted, team, baseCenter[(int)team],
+                EventSeverity.Info, techId, $"研究完成：{t.name} Lv{TechLevel(team, t.effect)}");
         }
 
         // ---------------- 建造（AI 用固定槽位；玩家自由选址） ----------------

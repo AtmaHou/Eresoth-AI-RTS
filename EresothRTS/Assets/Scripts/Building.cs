@@ -106,6 +106,7 @@ namespace Eresoth
                     var spawnP = transform.position + dir * (radius + 1.5f) + new Vector3(-dir.z, 0, dir.x) * c.x + dir * c.y;
                     spawnP.y = Game.TerrainHeight(spawnP.x, spawnP.z);
                     var u = Unit.Spawn(team, def, spawnP);
+                    EconomyPlanner.I?.OnUnitTrained(team, def);   // 经济计划训练进度回调
                     // 集结点压在资源上时工人出厂即上工，其他单位/情况走到集结点
                     var w = u.GetComponent<Worker>();
                     var n = Game.I.NearestNodeAny(rally);
@@ -195,7 +196,21 @@ namespace Eresoth
         public void Damage(float dmg)
         {
             hp -= dmg * (constructing ? GameConfig.ConstructionDamageMultiplier : 1f);
-            if (hp <= 0) { hp = 0; Destroy(gameObject); }
+            // 事件挂钩：主基地遇袭（5 秒去重防刷屏），供紧急回防/战报使用
+            if (kind == "hall" && Game.I != null && Game.I.started && Time.time - lastAttackEventT > 5f)
+            {
+                lastAttackEventT = Time.time;
+                GameEventBus.Publish(GameEventType.BaseUnderAttack, team, transform.position,
+                    EventSeverity.Critical, "hall", $"{DisplayName} 正在遭受攻击！");
+            }
+            if (hp <= 0)
+            {
+                hp = 0;
+                GameEventBus.Publish(GameEventType.BuildingDestroyed, team, transform.position,
+                    kind == "hall" ? EventSeverity.Critical : EventSeverity.Warning,
+                    kind, $"{DisplayName} 被摧毁");
+                Destroy(gameObject);
+            }
         }
 
         public bool AddBuilder(Unit worker)

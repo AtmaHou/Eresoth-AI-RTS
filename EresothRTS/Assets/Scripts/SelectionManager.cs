@@ -25,6 +25,7 @@ namespace Eresoth
         void Update()
         {
             if (!Game.I.started || Game.I.over) return;
+            if (CommandConsole.TypingActive || CommandConsole.PointerOver) return;  // 指挥台交互中：选择与指挥静默
             if (cam == null) cam = Camera.main;   // 世界在开局确认后才生成，相机随之出现
             selected.RemoveAll(u => u == null);
 
@@ -136,12 +137,18 @@ namespace Eresoth
             }
             if (selected.Count == 0) return;
 
+            // 手动接管：玩家直接指挥的单位 8 秒内不受军团执行体调度，随后自动回归
+            for (int i = 0; i < selected.Count; i++)
+                selected[i].manualOverrideUntil = Time.time + 8f;
+
             var eu = hit.collider.GetComponentInParent<Unit>();
-            if (eu != null && eu.team != Game.I.playerTeam)
+            if (eu != null && eu.team != Game.I.playerTeam
+                && FogOfWarManager.VisibleToPlayer(eu.transform.position))
             { foreach (var u in selected) u.CommandAttack(eu); return; }
 
             var eb = hit.collider.GetComponentInParent<Building>();
-            if (eb != null && eb.team != Game.I.playerTeam)
+            if (eb != null && eb.team != Game.I.playerTeam
+                && FogOfWarManager.VisibleToPlayer(eb.transform.position))
             { foreach (var u in selected) u.CommandAttack(eb); return; }
 
             // 右键己方未完工建筑：让选中的工人参与建造

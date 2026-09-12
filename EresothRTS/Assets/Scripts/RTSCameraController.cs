@@ -12,6 +12,7 @@ namespace Eresoth
 
         void Update()
         {
+            if (CommandConsole.TypingActive) return;   // 指挥台输入中：镜头快捷键静默
             float dt = Time.deltaTime;
             Vector3 f = transform.forward; f.y = 0; f.Normalize();
             Vector3 r = transform.right; r.y = 0; r.Normalize();

@@ -1,257 +1,184 @@
 # Eresoth RTS 代码模块导读
 
-这份文档用于帮助快速理解项目代码。项目是一个 Unity 6 的纯代码 RTS Demo：场景只提供入口，地图、单位、建筑、资源和 UI 都在运行时生成。
+> 本版基于当前代码实读重写（对齐 Phase 1 Demo 现状）。旧版导读中关于 "WorkerAI"、"数值全在 GameConfig 硬编码" 等描述已过时，以本文为准。
+
+项目是一个 Unity 纯代码 RTS Demo：场景只提供入口，地形、单位、建筑、资源和 UI 全部运行时生成，零美术资源依赖。
 
 ## 1. 先记住这张关系图
 
 ```text
 Main.unity
     |
-    +-- RTSSceneSetup.cs       编辑器菜单：生成/准备演示场景
+    +-- RTSSceneSetup.cs          编辑器菜单：生成/准备演示场景（不参与运行时）
     |
-    +-- Game.cs                游戏总控、世界生成、资源、科技、胜负、弹道
+    +-- Game.cs                   游戏总控：世界生成、资源、科技、胜负、弹道、施工调度
           |
-          +-- Common.cs        规则和静态数据：UnitDef / BuildingDef / TechDef
-          +-- Unit.cs          所有单位的移动、攻击、索敌、受伤
-          |     \-- Worker.cs  工人的采集状态机
-          +-- Building.cs      建筑生产、研究、箭塔攻击、受伤
-          +-- ResourceNode.cs  树木和魔法水晶
+          +-- RTSConfig.cs        ScriptableObject 总配置（Inspector 可编辑的数值/单位/建筑/科技表）
+          +-- RuntimeConfig.cs    启动时加载 RTSConfig -> 生成 UnitDef/BuildingDef/TechDef 字典
+          +-- Common.cs           枚举、ITargetable、Def 类、MapSettings、GameConfig（代理层）
           |
-          +-- SelectionManager.cs  玩家选择和下达命令
-          +-- EnemyAI.cs            AI 每 2 秒做一次经济和军事决策
-          +-- GameHUD.cs            开局面板、资源栏、建筑操作、结算界面
-          +-- RTSCameraController.cs 镜头移动、缩放、旋转
-          \-- Gfx.cs               用 Unity 内置图元生成模型和材质
+          +-- Unit.cs             单位移动/攻击/索敌/克制/受伤/动画驱动
+          |     +-- Worker.cs     工人采集与施工状态机
+          |     +-- UnitVfx.cs    职业化战场特效（对象池，三档质量）
+          |
+          +-- Building.cs         建筑生产、研究、箭塔、施工进度
+          +-- ResourceNode.cs     树木 / 魔法水晶
+          |
+          +-- Models.cs           程序化建筑模型库（partial）
+          +-- Models.Units.cs     程序化单位模型库 + BodyRig 动画挂点（partial）
+          +-- Gfx.cs              材质缓存 + 图元/自定义 Mesh 工具
+          |
+          +-- SelectionManager.cs 玩家选择、右键命令、编队、建筑放置
+          +-- EnemyAI.cs          脚本 AI：动态经济分工 + 克制配比暴兵 + 波次进攻
+          +-- GameHUD.cs          OnGUI 界面：开局面板、资源栏、生产/研究、血条、结算
+          \-- RTSCameraController.cs 镜头平移/缩放/旋转
 ```
 
-## 2. 游戏启动流程
+## 2. 启动流程
 
-1. 打开 `Main.unity`，场景中的 `Game` 组件执行 `Awake()`。
-2. `Game.Awake()` 设置单例 `Game.I`，创建相机，并动态添加 `SelectionManager`、`EnemyAI`、`GameHUD`。
-3. `GameHUD` 显示开局设置。玩家选择阵营、地图随机和资源丰富度后点击开始。
-4. `Game.StartGame()` 将 `started` 设为 `true`，调用 `BuildWorld()`。
-5. `BuildWorld()` 创建地面、边界、资源点、双方主基地和初始工人。
-6. Unity 每帧调用各组件的 `Update()`：单位行动、工人采集、建筑生产/研究、AI 决策、弹道飞行和镜头控制同时运行。
-7. 按开局选择的胜利模式，主基地或全部建筑被摧毁时，`Game.CheckEnd()` 设置胜负；`GameHUD` 显示结算界面。
+1. 场景中的 `Game` 组件执行 `OnEnable()`：绑定单例 `Game.I`，调用 `RuntimeConfig.Initialize()` 加载 `Resources/EresothRTSConfig.asset`（缺失时用代码默认值兜底），初始化双方资源，创建相机，并动态挂载 `SelectionManager`、`EnemyAI`、`GameHUD`。
+2. `GameHUD` 显示开局设置面板：阵营、地图大小、资源丰富度、胜利条件、难度、随机种子开关。
+3. 玩家确认后 `Game.StartGame()`：读取 `MapSettings`（此刻才读，Awake 太早），困难难度给 AI 加资源补贴，按地图尺寸定位双方基地，调用 `BuildWorld()`。
+4. `BuildWorld()` 生成：灯光/天空盒 → 噪声起伏地形（`TerrainHeight`）→ 崖壁/装饰 → 资源点（只为 0 号侧布局，1 号取中心对称点保证公平）→ 双方主基地与初始工人。
+5. 每帧各组件 `Update()` 并行：单位行为、工人采集、建筑生产/研究、AI 决策（每 2 秒一轮）、弹道飞行、特效回收、镜头控制。
+6. 按胜利模式（摧毁主基地 / 摧毁所有建筑），`Game.CheckEnd()` 判定胜负，`GameHUD` 显示结算。
 
-## 3. 模块说明
+## 3. 配置体系（改动最大、最需要注意的部分）
 
-### 3.1 `Common.cs`：规则数据中心
+**数值不再硬编码在 `GameConfig`。** 新链路是：
 
-这是阅读项目时最应该先看的文件。它主要定义：
+```text
+RTSConfig (ScriptableObject, Inspector 可编辑)
+    -> RuntimeConfig.Initialize() 启动时加载一次
+    -> 生成 Dictionary<string, UnitDef/BuildingDef/TechDef>
+    -> GameConfig 静态属性代理转发（旧代码零改动）
+```
 
-- `Team`、`UnitKind`、`TechEffect` 等枚举。
-- `ITargetable`：单位和建筑都实现的统一目标接口。攻击、选取和未来 LLM 指挥不需要区分目标具体类型。
-- `UnitDef`：单位静态数据，如生命、伤害、射程、速度、造价、是否工人/英雄。
-- `BuildingDef`：建筑静态数据，如生命、造价、可训练单位、可研究科技和箭塔攻击参数。
-- `TechDef`：科技名称、费用、研究时间、最大等级和效果。
-- `MapSettings`：开局设置，并通过静态字段在“再来一局”时保留。
-- `GameConfig`：人口上限、采集速度、训练时间、施工时间、生产队列上限、克制倍率，以及所有单位/建筑/科技表。
+- 策划调数值：改 `Assets/Resources/EresothRTSConfig.asset`，不动代码。
+- 代码读数值：照旧用 `GameConfig.CounterBonus`、`GameConfig.Knight` 等静态入口。
+- 新增单位/建筑/科技：在 RTSConfig 资产里加条目（或改 `RuntimeConfig.FillDefaults` 的兜底表），通过 id 引用组装（`trainUnitIds`、`techIds`、`factionBuildings`）。
+- AI 决策参数也在 RTSConfig：进攻间隔、兵力阈值、工人数、资源价格与紧缺阈值（`resourceShortageRatio`）等。
 
-**改数值时**优先改 `GameConfig`，不要把数值散落到行为脚本中。行为脚本只负责“怎么执行”。
+## 4. 模块说明
 
-### 3.2 `Game.cs`：游戏总控
+### 4.1 `Common.cs`：类型与代理层
 
-`Game` 是场景中的核心单例，访问方式是 `Game.I`。它负责：
+- 枚举：`Team`、`UnitKind`（Worker/Infantry/Ranged/Cavalry，循环克制：步→骑→远程→步）、`TechEffect`、`VictoryMode`、`Difficulty`。
+- `ITargetable`：单位与建筑统一目标接口（Pos/Radius/Team/Alive/Hp01/Damage）。**后续 AI 军令层的 target 寻址用此接口**。
+- `UnitDef` / `BuildingDef` / `TechDef`：静态数据类，支持可选外部 prefab（空则回退程序化模型）。`UnitDef` 含英雄字段（光环 `auraRadius/auraBonus`、AOE `aoeRadius`）。
+- `MapSettings`：开局设置（static，跨"再来一局"保留）。
+- `GameConfig`：纯代理，全部转发到 `RuntimeConfig`。
 
-- 保存双方资源、科技等级、单位列表、建筑列表和资源点列表。
-- 生成地图、主基地、初始工人和相机。
-- 统一扣除资源、增加资源、统计人口和查询最近目标。
-- 管理远程攻击和箭塔共用的弹道系统。
-- 计算科技攻击/防御倍率、英雄攻击光环倍率和工人采集加成。
-- 校验建筑放置位置、创建施工对象、限制箭塔数量和资源收集站位置。
-- 检查主基地是否被摧毁并结束游戏。
+### 4.2 `Game.cs`：规则服务层（789 行）
 
-可以把它理解成“规则服务层”：实体负责自身行为，但跨实体的全局规则集中在这里。
+跨实体全局规则集中在此，实体只管自身行为：
 
-### 3.3 `Unit.cs`：单位运行时行为
+- **资源**：`TrySpend` / `Deposit` / `GatherAmt`（含收集站加成）、人口 `PopCount/PopCap`。
+- **科技**：`AtkMult`（每级 +15% 乘区）、`DefMult`、`FinishResearch`。
+- **弹道**：`SpawnProjectile`（远程兵/英雄/箭塔共用，支持英雄 AOE 溅射 + `NotifyAttacked` 通知）。
+- **英雄光环**：`AuraDmgMult`（附近有己方英雄则伤害加成）。
+- **建造**：`BuildStructure`（主基地 32 半径内随机选址）、`BuildForwardResourceHub`（朝中央富集矿方向的前哨收集站选址）、`CanPlaceAt`/`BuildAt`（玩家放置模式）、`AssignBuilders`（自动派空闲工人施工）。
+- **查询**：`NearestHall` / `NearestDeposit` / `NearestNode` / `BuildingOfKind`。
+- **世界生成**：`TerrainHeight(x,z)` 静态地形高度采样（所有实体贴地走）、`BuildTerrain/BuildCliffs/ScatterDecor`。
+- **提示**：`Toast(msg)` 仅玩家侧使用，AI 不得调用。
 
-`UnitDef` 是配置，`Unit` 是运行中的具体单位。每个单位包含阵营、当前生命值、目标、移动目的地和最近攻击者。
+### 4.3 `Unit.cs`：单位运行时（421 行）
 
-核心流程：
+- 命令入口：`CommandMove(Vector3)`、`CommandAttack(ITargetable)` —— **AI 军令层最终只能调用这两个入口**，不得直接改内部状态。
+- `MoveStep(dest, dt, stopRadius)`：供外部驱动（Worker、未来的军团执行体）使用的单步移动。
+- 自动索敌（`aggro` 半径）、被打后 `NotifyAttacked` 做"继续任务 vs 反击"的收益判断。
+- `CounterMult()`：循环克制 ×CounterBonus，对建筑/工人无加成。
+- 移动含局部避让（选空隙大的一侧绕行）与碰撞挤出，防止穿模。
+- `stunT` 瘫痪计时、`holdSlot` 驻守索引（预留机制）。
+- 动画：持有 `BodyRig rig`，行走/攻击时摆动腿臂披风等挂点；`AnimWalk()` 供 Worker 驱动。
+- 受击/死亡触发 `UnitVfx` 对应特效；`Damage()` 应用防御科技倍率。
 
-- `CommandMove(Vector3)`：清除攻击目标，设置移动目的地。
-- `CommandAttack(ITargetable)`：锁定单位或建筑目标。
-- `Update()`：按目标距离决定移动或攻击；没有显式目标时自动索敌。
-- `CommandMove()`：设置显式移动锁，移动完成前不会被自动索敌抢占；玩家可随时重新下达移动或攻击命令。
-- 被攻击后通过 `lastAttacker` 自动反击并追击。
-- 远程单位调用 `Game.SpawnProjectile()`，近战单位直接造成伤害。
-- `CounterMult()` 实现步兵克骑兵、远程克步兵、骑兵克远程。
-- `Damage()` 应用本阵营防御科技倍率，生命值归零后销毁对象。
-
-**未来接入 LLM 的关键位置**：LLM 不应直接改单位内部状态，而应最终调用 `CommandMove` 或 `CommandAttack`。
-
-### 3.4 `Worker.cs`：工人采集与施工状态机
-
-工人是带有 `Worker` 组件的 `Unit`。它不负责普通战斗，而是在采集和施工状态之间循环：
+### 4.4 `Worker.cs`：采集/施工状态机（97 行）
 
 ```text
 Idle -> ToNode -> Gathering -> Returning -> ToNode
-  \-> Constructing
+  \-> Constructing -> Building
 ```
 
-- `GatherAt()`：指定树木或魔法水晶。
-- 到达资源点后按 `GameConfig.GatherTime` 计时。
-- 采集量来自 `Game.GatherAmt()`；有伐木场时木材采集量增加 50%。
-- 回到最近主基地或资源收集站后通过 `Game.Deposit()` 入账；收集站提供采集加成并支持分矿。
-- 建筑放置后，空闲工人进入 `Constructing`，建筑读条完成前生命值逐步增长，施工中受到双倍伤害；玩家重新派工人后不会被自动立即抢回。
-- 资源点耗尽后销毁，工人回到空闲状态。
+- `GatherAt(node)`、`BuildAt(building)`、`FinishBuilding`、`StopGather`。
+- `CanAutoBuild`：Idle 且未主动被玩家派活时才接受自动施工调度（玩家指派有 `constructionOptOut` 保护，不会被立即抢回）。
+- 交付走 `Game.NearestDeposit`（主基地或资源收集站就近）。
 
-### 3.5 `Building.cs`：建筑生产与科技
+### 4.5 `Building.cs`：建筑运行时（243 行）
 
-建筑通过 `BuildingDef` 决定能力，不同建筑共享同一套运行时脚本：
+- 数据驱动：`BuildingDef.train`（可训练）、`techs`（可研究）、`atkRange > 0` 即防御塔。
+- 生产队列 `queue`（上限 `MaxProductionQueue`）、研究单槽 `research/researchTimer`。
+- 施工系统：`constructing` + `constructionProgress`，施工中 HP 逐步增长、受伤 ×2，`NeedsBuilders` 驱动 `Game.AssignBuilders` 派工；建成后回调 `EnemyAI.OnBuildingCompleted`。
+- `rally` 集结点；未完工建筑不能生产/研究/攻击。
 
-- 主基地：训练工人。
-- 兵营/地穴：训练步兵和英雄，并研究攻防科技。
-- 弓箭场/诅咒神殿：训练远程单位。
-- 马厩/死亡马厩：训练骑兵。
-- 资源收集站：作为远端资源交付点，并为全阵营提供采集加成。
-- 箭塔：自动寻找射程内最近敌方单位并发射弹道。
+### 4.6 `EnemyAI.cs`：脚本 AI（392 行）
 
-生产使用 `queue`，所有可生产建筑统一最多排队 `GameConfig.MaxProductionQueue` 个单位；研究使用单独的 `research` 槽位。未完工建筑不能生产、研究或提供完整功能。
+每 `aiDecisionInterval`（2s）一轮决策，已比旧导读描述的"固定配比"更智能：
 
-### 3.6 `EnemyAI.cs`：第一阶段脚本 AI
+1. **动态经济分工**：按资源价格、库存紧缺度（`resourceShortageRatio`）和近期消耗预测，把空闲工人分配给 wood/mana；空闲超 N 轮强制重分配。
+2. 补工人至 `aiMaxWorkers` → 按序建兵种建筑/前哨资源收集站（`BuildForwardResourceHub`）/民居。
+3. 轮流研究攻防科技。
+4. **克制配比暴兵**：基础步:弓:骑 = .38/.32/.30，根据玩家兵种构成向克制兵种偏移；资源够时出英雄。
+5. **波次进攻**：兵力达阈值后集结进攻，目标优先级：玩家分矿（收集站）→ 主基地附近守军 → 主基地；目标摧毁后自动选续攻目标。
 
-AI 每 2 秒执行一轮固定优先级决策：
+定位：规则驱动执行体。未来 LLM 接入时保留其底层能力，LLM 只做上层目标/策略决策；它也是自然语言指挥失败时的降级执行体。
 
-1. 以魔法矿为主给空闲工人分配资源，保留少量工人采木。
-2. 主基地补充工人，最多维持 8 名工人。
-3. 按顺序建造兵种建筑、远端资源收集站和民居。
-4. 轮流研究攻击和防御科技。
-5. 按步兵、远程、骑兵比例训练军队，并在资源充足时训练英雄。
-6. 部队达到阈值后持续集结攻击玩家；波次之间有冷却，AI 会在分矿、前线部队和主基地之间选择目标。
+### 4.7 `SelectionManager.cs`：输入适配层（270 行）
 
-它是规则驱动的执行体，不是通用规划器。后续如果加入 LLM，建议保留这里的基础执行能力，把 LLM 放在“决定目标/策略”的上层。
+左键点选/框选/双击选同类、右键移动/攻击/采集、选中建筑右键设集结点、Ctrl/Alt+数字编队、建造放置模式（`BeginPlacement`，左键确认、右键/Esc 取消）。只负责把输入翻译成调用，不含任何规则逻辑。
 
-### 3.7 `SelectionManager.cs`：玩家输入到游戏命令的适配器
+### 4.8 `GameHUD.cs`：OnGUI 界面（295 行）
 
-该脚本把鼠标和键盘操作转换为游戏对象能理解的调用：
+零 UI 资源，全部 `OnGUI()`：开局面板、资源/人口/科技栏、建筑生产与研究按钮（内容来自 `BuildingDef`，新增单位无需改 HUD）、血条、Toast、结算界面。
 
-- 左键点击：选择单位或建筑。
-- 左键拖动：框选己方单位。
-- 双击单位：选择屏幕内同类型单位。
-- 右键地面：对选中单位调用 `CommandMove()`。
-- 右键敌人：调用 `CommandAttack()`。
-- 右键资源点：工人调用 `Worker.GatherAt()`。
-- 选中建筑后右键：修改建筑集结点。
-- `Ctrl/Alt + 数字` 保存编队，数字键召回编队。
-- 建造时进入放置模式，使用 `Game.CanPlaceAt()` 校验，确认后调用 `Game.BuildAt()`。
+### 4.9 表现层：`Models.cs` + `Models.Units.cs` + `Gfx.cs` + `UnitVfx.cs`
 
-这是“输入层”，不应在这里实现伤害、资源扣除或单位移动细节。
+- `Gfx`：材质缓存（金属度/光滑度/自发光参数版）、图元创建、自定义 Mesh（屋顶/棱柱/圆台/面片）。
+- `Models`（partial，1429 行合计）：纯代码拼装的低多边形风格化模型库。`Models.cs` 负责建筑与调色板 `Pal`（人族暖木石/不死暗紫骨白两套）；`Models.Units.cs` 负责人形骨架、武器、盾牌、披风、马体、英雄专属造型（骑士团长/霜骨巫妖），并定义 **`BodyRig` 动画挂点集合**（行走/攻击动画与特效定位都靠它，仅限视觉层使用）。
+- `UnitVfx`：三档质量（Off/Low/High）对象池特效——移动尘土、攻击前摇、命中火花、格挡、采集、死亡，按阵营区分视觉语言（人族金色火花/不死魂火骨屑）。
 
-### 3.8 `GameHUD.cs`：无资源 UI
+### 4.10 `RTSCameraController.cs` / `ResourceNode.cs`
 
-所有界面使用 Unity `OnGUI()` 绘制，不依赖 Canvas 或美术资源。主要包括：
+- 镜头：WASD/方向键/贴边平移、滚轮缩放、Q/E 旋转，限制在地图范围内。
+- 资源点：`wood`/`mana` 两种，只持有类型与余量，耗尽销毁。
 
-- 开局设置面板。
-- 顶部资源、人口、科技等级和地图种子信息。
-- 选中建筑后的训练、建造和研究按钮。
-- 选中单位后的数量和操作提示。
-- 单位/建筑血条。
-- 胜负结算与重新开始。
-
-按钮内容主要来自 `BuildingDef.train` 和 `BuildingDef.techs`，因此新增可训练单位或科技时通常不需要修改 HUD。
-
-### 3.9 `RTSCameraController.cs`：RTS 镜头
-
-挂在 `CameraRig` 上，控制：
-
-- WASD、方向键和鼠标贴边平移。
-- 鼠标滚轮缩放，并限制最小/最大距离。
-- Q/E 旋转。
-- 将镜头位置限制在地图范围内。
-
-### 3.10 `ResourceNode.cs`：资源实体
-
-资源点只关心资源类型和剩余数量：`wood` 表示木头，`mana` 表示魔法水晶。`Game.BuildWorld()` 决定生成位置和数量，`Worker` 决定如何采集。
-
-### 3.11 `Gfx.cs`：程序化表现层
-
-提供两个公共工具：
-
-- `Mat(Color)`：按颜色缓存材质，兼容内置管线和 URP。
-- `Prim(...)`：创建内置 Cube、Sphere、Cylinder 等图元，并自动移除装饰图元的碰撞体。
-
-单位、建筑、资源点的外观都在运行时由它拼出来，因此项目不需要额外美术资源。
-
-### 3.12 `Assets/Editor/RTSSceneSetup.cs`：编辑器工具
-
-它属于编辑器侧代码，不参与运行时战斗逻辑。README 中的“工具 → 生成 RTS 演示场景”入口由它提供，主要用于创建或准备演示场景。
-
-## 4. 三条最重要的数据流
-
-### 玩家移动/攻击
+## 5. 三条核心数据流
 
 ```text
-鼠标输入
-  -> SelectionManager.Command()
-  -> Unit.CommandMove() / Unit.CommandAttack()
-  -> Unit.Update()
-  -> MoveStep() 或 FaceAndHit()
-  -> Damage()
+玩家命令：鼠标 -> SelectionManager -> Unit.CommandMove/CommandAttack -> Unit.Update -> Damage
+工人采集：右键资源点 -> Worker.GatherAt -> 状态机 -> Game.GatherAmt -> Game.Deposit
+建筑生产：HUD 按钮 -> Building.TryTrain -> Game.TrySpend -> queue -> Unit.Spawn
 ```
 
-### 工人采集
-
-```text
-右键资源点
-  -> SelectionManager
-  -> Worker.GatherAt()
-  -> Worker 状态机
-  -> Game.GatherAmt()
-  -> Game.Deposit()
-```
-
-### 建筑生产
-
-```text
-GameHUD 按钮
-  -> Building.TryTrain()
-  -> Game.TrySpend()
-  -> Building.queue
-  -> Building.Update()
-  -> Unit.Spawn()
-```
-
-## 5. 推荐阅读顺序
-
-### 只想快速理解
-
-1. `Common.cs`：看数据表和全局常量。
-2. `Game.cs`：看世界如何创建、资源如何流动、胜负如何判定。
-3. `Unit.cs`：看单位如何移动、攻击和自动反击。
-4. `Building.cs`：看生产、科技和箭塔。
-5. `SelectionManager.cs`：看玩家输入如何变成命令。
-6. `EnemyAI.cs`：看 AI 如何使用同一套建筑和单位接口。
-
-### 想修改功能
+## 6. 修改速查表
 
 | 想修改的内容 | 优先查看 |
 | --- | --- |
-| 单位属性、建筑费用、科技数值 | `Common.cs` 的 `GameConfig` |
-| 新增单位类型或攻击效果 | `Unit.cs`、`UnitDef` |
-| 采集速度、资源点数量、中央富集矿 | `Worker.cs`、`Game.BuildWorld()`、`GameConfig` |
-| 新建筑、施工或生产队列 | `Building.cs`、`BuildingDef`、`GameHUD.cs` |
-| 玩家快捷键和指挥方式 | `SelectionManager.cs` |
-| AI 行为和进攻节奏 | `EnemyAI.cs` |
-| 地图大小、中央富集区和随机规则 | `Game.BuildWorld()`、`MapSettings` |
-| 单位/建筑外观 | `Unit.BuildBody()`、`Building.Spawn()`、`Gfx.cs` |
+| 任何数值、单位/建筑/科技属性 | `EresothRTSConfig.asset`（或 `RuntimeConfig.FillDefaults`） |
+| 新增单位/建筑/科技 | RTSConfig 资产条目 + id 引用组装 |
+| 单位战斗/移动/克制 | `Unit.cs` |
+| 采集与施工 | `Worker.cs`、`Game.AssignBuilders` |
+| 生产/研究/箭塔 | `Building.cs` |
+| AI 经济与进攻节奏 | `EnemyAI.cs` + RTSConfig 的 AI 参数区 |
+| 地图/地形/资源分布 | `Game.BuildWorld()`、`TerrainHeight`、`MapSettings` |
+| 玩家输入方式 | `SelectionManager.cs` |
+| 界面 | `GameHUD.cs` |
+| 单位/建筑外观 | `Models.Units.cs` / `Models.cs`（+ `BodyRig`） |
+| 特效 | `UnitVfx.cs`（含质量档位） |
 | 胜负条件 | `Game.CheckEnd()` |
-| LLM 军令接口 | `Unit.CommandMove()`、`Unit.CommandAttack()` |
-| 平衡参数 | `Common.cs` 的 `GameConfig` 顶部和各 `UnitDef` 行 |
-| AI 难度 | `MapSettings.difficulty`、`GameConfig.AiHard*` |
+| **AI 军令层接口（重要）** | `Unit.CommandMove()` / `Unit.CommandAttack()` / `ITargetable` |
 
-## 6. 修改时的注意事项
+## 7. 修改时的注意事项
 
-- 单位和建筑都实现 `ITargetable`，新增攻击目标时优先复用这个接口。
-- 全局列表由 `Game` 持有；实体销毁时依靠各自的 `OnDestroy()` 移除自己。
-- 新增可训练单位时，先在 `GameConfig` 创建 `UnitDef`，再放入对应 `BuildingDef.train`。
-- 新增科技时，创建 `TechDef`，加入 `GameConfig.Techs`，再把 ID 放入建筑的 `techs`。
-- 远程攻击不要直接在单位里瞬间扣血，应使用 `Game.SpawnProjectile()` 保持弹道表现一致。
-- 只有玩家阵营的提示才应调用 `Game.Toast()`，AI 不应污染玩家提示。
-- 调试地图布局时关闭地图随机，固定种子可以复现同一布局。
-- 代码依赖 Unity 旧版输入 API；若输入无响应，检查 README 中的 Active Input Handling 设置。
+- 单位与建筑都实现 `ITargetable`，新增可攻击目标优先复用。
+- 全局列表由 `Game` 持有，实体销毁时各自 `OnDestroy()` 移除自己。
+- 远程攻击必须用 `Game.SpawnProjectile()`，不要瞬间扣血。
+- 所有实体贴地走 `Game.TerrainHeight(x, z)`，新增生成逻辑不要假设 y=0。
+- 只有玩家阵营提示可调用 `Game.Toast()`。
+- 调试布局时 `MapSettings.randomMap = false`，固定种子 20240901 可复现。
+- 输入依赖 Unity 旧版 Input API，无响应时检查 Active Input Handling 设置。
+- RTSConfig 资产缺失时代码默认值兜底，但正式调参以资产为准，两处不要改出分歧。
 
-## 7. 一句话总结
+## 8. 一句话总结
 
-这是一个“数据由 `Common` 集中配置、规则由 `Game` 统筹、实体由 `Unit/Worker/Building` 执行、玩家和 AI 通过统一命令入口驱动”的小型 RTS 架构。
+数据由 `RTSConfig → RuntimeConfig → GameConfig` 集中供给，规则由 `Game` 统筹，实体由 `Unit/Worker/Building` 执行，表现由 `Models/Gfx/UnitVfx` 程序化生成，玩家与脚本 AI 经统一命令入口驱动——为接入 LLM 军令层预留的扩展点是 `ITargetable` 与 `Unit.CommandMove/CommandAttack`。
