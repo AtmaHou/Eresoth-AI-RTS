@@ -12,12 +12,41 @@ namespace Eresoth
         SelectionManager sel;
         GUIStyle mid, big;
         bool showCommandPanel;   // F9：指挥调试面板（军团状态 + 事件战报）
+        bool showLlmSettings;    // F10 / 面板按钮：LLM 配置（只在开局菜单，对局内不出现）
+        string llmUrl = "", llmKey = "", llmModel = "", llmMsg = "";
 
         void Start() { sel = GetComponent<SelectionManager>(); }
 
         void Update()
         {
             if (Input.GetKeyDown(KeyCode.F9)) showCommandPanel = !showCommandPanel;
+            var g = Game.I;
+            if (g != null && !g.started && Input.GetKeyDown(KeyCode.F10)) ToggleLlmSettings();
+        }
+
+        void ToggleLlmSettings()
+        {
+            showLlmSettings = !showLlmSettings;
+            if (!showLlmSettings) return;
+            if (LlmClient.I != null) LlmClient.I.GetConfig(out llmUrl, out llmKey, out llmModel);
+            if (string.IsNullOrWhiteSpace(llmUrl)) llmUrl = "https://api.openai.com/v1";
+            if (string.IsNullOrWhiteSpace(llmModel)) llmModel = "gpt-4o-mini";
+            llmMsg = "";
+        }
+
+        void SaveLlmSettings()
+        {
+            if (LlmClient.I == null) return;
+            LlmClient.I.SaveLocal(llmUrl, llmKey, llmModel);
+            llmMsg = LlmClient.I.Available ? "已保存到本机（不入库）" : "已保存但不可用（缺 key？）";
+        }
+
+        void ClearLlmSettings()
+        {
+            if (LlmClient.I == null) return;
+            LlmClient.I.ClearLocal();
+            llmKey = "";
+            llmMsg = LlmClient.I.Available ? "已清除（改用根目录配置）" : "已清除，LLM 不可用（走兜底）";
         }
 
         void EnsureStyles()
@@ -81,10 +110,15 @@ namespace Eresoth
             GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), Texture2D.whiteTexture);
             GUI.color = Color.white;
 
-            float w = 520, h = 452;
+            float w = 520, h = 452 + (showLlmSettings ? 140 : 0);
             var r = new Rect((Screen.width - w) / 2f, (Screen.height - h) / 2f, w, h);
             GUI.Box(r, GUIContent.none);
             GUI.Label(new Rect(r.x, r.y + 16, r.width, 40), "厄瑞索斯 RTS", big);
+
+            // LLM 设置入口（配置只放菜单，对局内不再出现）；按钮上直接显示就绪状态
+            bool ready = LlmClient.I != null && LlmClient.I.Available;
+            Btn(new Rect(r.x + w - 158, r.y + 18, 138, 30),
+                $"LLM：{(ready ? "已就绪" : "未配置")}", ToggleLlmSettings, true);
 
             // 阵营选择：人类 / 不死族（另一方由 AI 操控）
             Btn(new Rect(r.x + 50, r.y + 72, 110, 32),
@@ -137,6 +171,39 @@ namespace Eresoth
                 MapSettings.demoMode ? "开局带12兵+2兵营，直接打字指挥" : "标准开局", mid);
 
             Btn(new Rect(r.x + 140, r.y + 384, 200, 42), "开 始 游 戏", () => g.StartGame(), true);
+
+            if (showLlmSettings) DrawLlmSettings(r);
+        }
+
+        /// <summary>菜单内的 LLM 配置区：运行时填写，保存到项目目录之外的本机文件（git 提交不到）。</summary>
+        void DrawLlmSettings(Rect r)
+        {
+            const float lblW = 64, rowH = 22;
+            float fx = r.x + 50, fw = r.width - 100 - lblW - 8;
+            float ty = r.y + 440;
+            GUI.Label(new Rect(fx, ty, 420, 20), "LLM 配置（运行时填写，密钥只存本机）", mid);
+            ty += 24;
+            GUI.Label(new Rect(fx, ty, lblW, rowH), "接口地址", mid);
+            GUI.SetNextControlName("llmUrl");
+            llmUrl = GUI.TextField(new Rect(fx + lblW, ty, fw, rowH), llmUrl, 200);
+            ty += rowH;
+            GUI.Label(new Rect(fx, ty, lblW, rowH), "密钥", mid);
+            GUI.SetNextControlName("llmKey");
+            llmKey = GUI.PasswordField(new Rect(fx + lblW, ty, fw, rowH), llmKey, '*', 200);
+            ty += rowH;
+            GUI.Label(new Rect(fx, ty, lblW, rowH), "模型", mid);
+            GUI.SetNextControlName("llmModel");
+            llmModel = GUI.TextField(new Rect(fx + lblW, ty, fw, rowH), llmModel, 80);
+            ty += rowH + 4;
+
+            if (GUI.Button(new Rect(fx, ty, 100, 24), "保存到本机")) SaveLlmSettings();
+            GUI.enabled = LlmClient.I != null && LlmClient.I.HasLocalConfig;
+            if (GUI.Button(new Rect(fx + 108, ty, 100, 24), "清除本机配置")) ClearLlmSettings();
+            GUI.enabled = true;
+            GUI.Label(new Rect(fx + 216, ty + 2, r.width - 266, 22), llmMsg, mid);
+            ty += 28;
+            GUI.Label(new Rect(fx, ty, r.width - 100, 20),
+                "保存在项目目录之外；也可手动放项目根 llm_config.json（已 gitignore）。", mid);
         }
 
         void DrawBottom()

@@ -20,6 +20,7 @@ namespace Eresoth
         public float researchTimer;
         float timer;
         float towerCd;               // 防御塔攻击冷却
+        float lastAttackEventT = -10f; // 主基地遇袭事件去重（Damage 内 5 秒节流）
         Transform constructionSite;
         Renderer[] modelRenderers;
 

@@ -52,6 +52,12 @@ EresothRTS/AssetStoreTools*
 # ===================== 本机工具配置 =====================
 .codely-cli/
 
+# LLM 密钥配置：只允许模板入库；llm_config.json 只许本机存在（项目根或 EresothRTS/ 下），
+# 防止不知情提交把 api_key 推到云端仓库。运行时填写走 persistentDataPath，仓库目录之外。
+llm_config.json
+# 对局日志（LLM 指挥数据），每局本地生成，属运行数据不入库
+EresothRTS/command_log.jsonl
+
 # ===================== 操作系统垃圾文件 =====================
 .DS_Store
 .DS_Store?

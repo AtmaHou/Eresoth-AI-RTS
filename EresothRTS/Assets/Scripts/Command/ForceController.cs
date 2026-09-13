@@ -201,7 +201,7 @@ namespace Eresoth
                 return;
             }
             LogEngaged(f, o);
-            Issue(f, o, u => { if (u.target != best) u.CommandAttack(best); });
+            Issue(f, o, u => { if ((object)u.target != best) u.CommandAttack(best); });
         }
 
         void DoRegroup(Force f, Order o)
@@ -251,7 +251,7 @@ namespace Eresoth
         /// <summary>触发条件：当前军令完成，按条件定义提交后继军令（默认撤到撤退点）。</summary>
         void TriggerCondition(Force f, Order o, OrderCondition c)
         {
-            OrderDispatcher.I.Complete(o, OrderState.Completed, $"触发条件：{c.when}");
+            OrderDispatcher.I.Complete(o, OrderState.Completed, $"触发条件：{c.Describe()}");
             OrderDispatcher.I.SubmitOrder(new Order
             {
                 playerText = o.playerText,
@@ -269,8 +269,12 @@ namespace Eresoth
             float threshold = -1f;
             if (f.stance == ForceStance.Cautious) threshold = LowHpDefault;
             for (int i = 0; i < o.conditions.Count; i++)
-                if (o.conditions[i].when == "self_health_below")
-                    threshold = Mathf.Max(threshold, o.conditions[i].threshold);
+            {
+                var hc = o.conditions[i];
+                if (hc.metric == ConditionMetric.AllyHealthRatio
+                    && (hc.op == ConditionOp.Lt || hc.op == ConditionOp.Le))
+                    threshold = Mathf.Max(threshold, hc.value);
+            }
             if (threshold <= 0f) return;
 
             for (int i = 0; i < f.units.Count; i++)

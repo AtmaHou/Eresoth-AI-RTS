@@ -119,7 +119,7 @@ NavMeshSettings:
     debug:
       m_Flags: 0
   m_NavMeshData: {fileID: 0}
---- !u!1 &1407013257
+--- !u!1 &984306046
 GameObject:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -127,8 +127,8 @@ GameObject:
   m_PrefabAsset: {fileID: 0}
   serializedVersion: 6
   m_Component:
-  - component: {fileID: 1407013259}
-  - component: {fileID: 1407013258}
+  - component: {fileID: 984306048}
+  - component: {fileID: 984306047}
   m_Layer: 0
   m_Name: GAME
   m_TagString: Untagged
@@ -136,34 +136,36 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
---- !u!114 &1407013258
+--- !u!114 &984306047
 MonoBehaviour:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1407013257}
+  m_GameObject: {fileID: 984306046}
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0818297539b37734391eb640463c2042, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Eresoth.Game
-  wood: 7800000078000000
-  mana: 3c0000003c000000
+  wood: 0000000000000000
+  mana: 0000000000000000
   atkLevel: 0000000000000000
   defLevel: 0000000000000000
   over: 0
   started: 0
   winner: -1
   seed: 0
+  playerTeam: 0
+  enemyAI: {fileID: 0}
   toast: 
---- !u!4 &1407013259
+--- !u!4 &984306048
 Transform:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1407013257}
+  m_GameObject: {fileID: 984306046}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
@@ -176,4 +178,4 @@ Transform:
 SceneRoots:
   m_ObjectHideFlags: 0
   m_Roots:
-  - {fileID: 1407013259}
+  - {fileID: 984306048}

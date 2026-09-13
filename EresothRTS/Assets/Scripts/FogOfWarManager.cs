@@ -14,7 +14,7 @@ namespace Eresoth
 
         const int Res = 128;                  // 迷雾网格分辨率（覆盖整张地图）
         const float Interval = 0.25f;         // 视野刷新间隔（秒）
-        const float PlaneY = 3.4f;            // 迷雾平面高度：高于地形起伏与装饰，低于多数建筑顶部
+        const float PlaneY = 4.5f;            // 迷雾平面高度：高于地形起伏与树冠（树顶≈地形+4.1），让迷雾盖住树木；仍低于主基地等高大建筑顶部，保留剪影
         const float ExploredAlpha = 0.45f;    // 已探索不可见区域的暗化程度（0=全透 1=全黑）
 
         readonly byte[] explored = new byte[Res * Res];
@@ -215,14 +215,21 @@ namespace Eresoth
                 if (b == null) continue;
                 ApplyVisibility(b.gameObject, b.team == pt || VisibleAt(b.transform.position));
             }
+            // 树木/魔法矿等地表资源：未探索区域完全不显示（与平面迷雾配合，树冠不再透出黑区）
+            foreach (var n in g.nodes)
+            {
+                if (n == null) continue;
+                ApplyVisibility(n.gameObject, ExploredAt(n.transform.position));
+            }
         }
 
-        /// <summary>迷雾关闭时恢复全部渲染（包括本局之前被隐藏的敌人）。</summary>
+        /// <summary>迷雾关闭时恢复全部渲染（包括本局之前被隐藏的敌人和资源点）。</summary>
         void RestoreAllVisibility()
         {
             var g = Game.I;
             foreach (var u in g.units) if (u != null) ApplyVisibility(u.gameObject, true);
             foreach (var b in g.buildings) if (b != null) ApplyVisibility(b.gameObject, true);
+            foreach (var n in g.nodes) if (n != null) ApplyVisibility(n.gameObject, true);
         }
 
         void ApplyVisibility(GameObject go, bool vis)
