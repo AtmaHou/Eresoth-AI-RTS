@@ -10,7 +10,7 @@ namespace Eresoth
     public class GameHUD : MonoBehaviour
     {
         SelectionManager sel;
-        GUIStyle mid, big;
+        GUIStyle mid, big, small;
         bool showCommandPanel;   // F9：指挥调试面板（军团状态 + 事件战报）
         bool showLlmSettings;    // F10 / 面板按钮：LLM 配置（只在开局菜单，对局内不出现）
         string llmUrl = "", llmKey = "", llmModel = "", llmMsg = "";
@@ -56,6 +56,8 @@ namespace Eresoth
             mid.normal.textColor = Color.white;
             big = new GUIStyle(GUI.skin.label) { fontSize = 28, alignment = TextAnchor.MiddleCenter };
             big.normal.textColor = Color.white;
+            small = new GUIStyle(GUI.skin.label) { fontSize = 12, wordWrap = true };
+            small.normal.textColor = new Color(.85f, .85f, .85f);
         }
 
         void OnGUI()
@@ -110,7 +112,7 @@ namespace Eresoth
             GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), Texture2D.whiteTexture);
             GUI.color = Color.white;
 
-            float w = 520, h = 452 + (showLlmSettings ? 140 : 0);
+            float w = 520, h = 452 + (showLlmSettings ? 164 : 0);
             var r = new Rect((Screen.width - w) / 2f, (Screen.height - h) / 2f, w, h);
             GUI.Box(r, GUIContent.none);
             GUI.Label(new Rect(r.x, r.y + 16, r.width, 40), "厄瑞索斯 RTS", big);
@@ -202,8 +204,16 @@ namespace Eresoth
             GUI.enabled = true;
             GUI.Label(new Rect(fx + 216, ty + 2, r.width - 266, 22), llmMsg, mid);
             ty += 28;
-            GUI.Label(new Rect(fx, ty, r.width - 100, 20),
-                "保存在项目目录之外；也可手动放项目根 llm_config.json（已 gitignore）。", mid);
+            GUI.Label(new Rect(fx, ty, r.width - 100, 34),
+                "保存位置（本机，不入库）：\n" + SplitPath(LlmClient.LocalConfigPath), small);
+        }
+
+        /// <summary>长路径折行：在第 50 个字符前的最后一个反斜杠处断开，避免超出面板。</summary>
+        static string SplitPath(string p)
+        {
+            if (p.Length <= 55) return p;
+            int cut = p.LastIndexOf('\\', 50);
+            return cut > 0 ? p.Substring(0, cut + 1) + "\n" + p.Substring(cut + 1) : p;
         }
 
         void DrawBottom()

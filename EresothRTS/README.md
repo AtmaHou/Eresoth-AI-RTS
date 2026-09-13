@@ -1,13 +1,18 @@
 # 厄瑞索斯 RTS（Eresoth RTS）
 
 对应《RTS对战游戏项目启动设计文档》M1 垂直切片 + D1 文字指挥 Demo：**纯代码生成，零美术资源，开箱即玩**。
-当前版本 **v2.1.0**，详见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本 **v2.2.0**，详见 [CHANGELOG.md](CHANGELOG.md)。
+
+> **v2.2 新特性：指挥栏改版 + 菜单内 LLM 配置。**
+> 指挥台改为**右侧可收放侧栏**——收拢后只剩小把手，不再遮挡战场；内置高频命令 tips（点击即填入输入框）与滚动建议展播，降低文字指挥的上手门槛。
+> LLM 密钥改在**开局菜单**填写（右上角"LLM"按钮或 F10）：密码掩码输入，保存到本机并**在界面显示完整保存路径**，永远不会误提交到仓库。
+> 战争迷雾现在能正确覆盖树木，未探索区域的资源点也不再显示。
 
 > **v2.1 新特性：战争迷雾（可开关）。** 魔兽式双重迷雾：未探索全黑、已探索半暗、可见清晰；
 > 看不见的敌人整体隐藏，参谋与条件军令也只感知看得见的敌人——先侦察再调度，指挥体验更接近真实战场。
 > 开局面板与游戏内顶栏均可随时开关对比。
 
-> **v2.0 新特性：AI 文字指挥。** 左下角指挥台直接用中文下令（"二军团去打东矿，遇到主力就撤"），
+> **v2.0 新特性：AI 文字指挥。** 指挥栏直接用中文下令（"二军团去打东矿，遇到主力就撤"），
 > LLM 参谋解析为结构化军令，军团自主执行并在战报面板回报。支持离线兜底解析。
 > 配置方法见下方"第 2 步：配置 AI 参谋（可选）"。
 > **能玩什么、怎么验证**：见 [../ProjectBook/体验验证指南.md](../ProjectBook/体验验证指南.md)。
@@ -33,16 +38,19 @@
 3. 如提示版本不一致，选择你本机已安装的 Unity 6 即可
 
 ### 第 2 步：配置 AI 参谋（可选，文字指挥需要）
-1. 把工程上一级目录的 `llm_config.template.json` 复制为 `llm_config.json`（与 `Assets` 同级）
-2. 填入任意 OpenAI 兼容服务的 `base_url` / `api_key` / `model`（国产模型网关亦可）
-3. 不配置也能玩：指挥台自动切换为本地关键词兜底解析
+- **推荐：运行时填写（不入库，不会泄露 key）。** 进入开局菜单后点右上角 **"LLM"按钮（或按 F10）** 展开配置区，
+  填入任意 OpenAI 兼容服务的 **接口地址 / 密钥 / 模型**（国产模型网关亦可），点 **"保存到本机"**。
+  配置保存在本机用户目录（`persistentDataPath`，界面会显示完整路径），**不在工程目录内，git 提交不到**；
+  "清除本机配置"可删除。不配置也能玩：指挥栏自动切换为本地关键词兜底解析。
+- 也可手动放置：把工程上一级目录的 `llm_config.template.json` 复制为与 `Assets` 同级的 `llm_config.json` 填入
+  （该文件已加入 .gitignore，不会提交；运行时保存的本机配置优先于它）。
 
 ### 第 3 步：生成场景并开始游戏
 1. 等待编辑器右下角编译完成（无转圈动画）
 2. 顶部菜单栏点击 **工具 → 生成RTS演示场景**
 3. 点击编辑器正上方的 **Play（▶）** 按钮开始游戏
 
-### 第 3 步：验证能正常游玩
+### 第 4 步：验证能正常游玩
 - 左键点选单位，右键点地面应能移动；滚屏/缩放正常即环境无误
 - 若报错或操作无响应，见下方"常见问题"
 
@@ -51,9 +59,10 @@
 - **阵营**：开局面板可选 **人类 / 不死族**（另一方由 AI 操控）
 - **演示模式（推荐首玩）**：开局面板勾选后，自带 12 兵两军团 + 兵营弓箭场 + 双倍资源，AI 进攻更激进，3 分钟即可体验完整指挥剧情
 - **AI 文字指挥（v2.0）**：
-  - 左下角指挥台打字下令，例如："一军团守家，二军团去打东矿，遇到主力就撤"、"造4个弓箭手，研究攻击科技"、"六成工人去采木头"
+  - 屏幕**右侧指挥栏**打字下令（可点"收拢"缩成把手，不挡战场），例如："一军团守家，二军团去打东矿，遇到主力就撤"、"造4个弓箭手，研究攻击科技"、"六成工人去采木头"
   - 支持条件军令（"如果……就……"）、多军团分兵、经济计划、参谋追问与战报回报
-  - **F9** 指挥面板（军团状态+战场动态）｜ **F10** 一键编组 ｜ **F1~F8** 硬编码示例军令（离线验证用）
+  - 栏内 **高频命令 tips**（点击填入输入框）与**滚动建议**（轮播可尝试的命令，点击填入）
+  - **F9** 指挥调试面板（军团状态+战场动态）｜ 对局内 **F10** 一键自动编组（开局菜单内 F10 是 LLM 配置）｜ **F1~F8** 硬编码示例军令（离线验证用）
   - 手动接管：鼠标直接指挥的单位 8 秒内不受军团调度，之后自动回归
 - **操作**：
   - 左键：点选 / 按住拖动框选
@@ -90,17 +99,17 @@
 - [x] 地图随机、地图大小、资源丰富度和胜利条件（开局设置面板）；中央魔法矿富集区鼓励开分矿
 - [x] 第一层科技：兵营/地穴研究攻防升级（每级 +15%，2 级）
 - [x] 脚本 AI 对手（魔法矿优先采集、建设远端资源收集站、判断攻击分矿或主基地）、胜负判定、再来一局
+- [x] **AI 文字指挥**：LLM 参谋 + 结构化军令 + 军团执行 + 条件触发 + 经济计划（v2.0）；战争迷雾联动感知（v2.1）
 - [ ] 第二层科技（AI 指挥科技，设计文档 5.4）——待指挥所/通灵塔与 LLM 层一起实现
-- [ ] **LLM 指挥管线**——接口已预留：所有玩家操作最终都收敛到 `Unit.CommandMove / CommandAttack`，
-      未来 LLM 军令层（设计文档 5.1）将调用同一组入口，无需改动单位层
 - [ ] 联机（M2）、锦囊模式（M3）、语音与 AI 将领（M4）
 
 ## 数值与扩展
-- 所有兵种/建筑/科技/采集数值集中在 `Assets/Scripts/Common.cs` 的 `GameConfig`（`UnitDef` / `BuildingDef` / `TechDef` 三张表），改数值不用碰逻辑
-- **平衡调试入口**：在 `GameConfig` 顶部修改 `InitialWood`、`InitialMana`、`GatherAmount`、`GatherTime`、`TrainTime`、`ConstructionTime`、`ConstructionDamageMultiplier`、`AiAssaultInterval`、`AiMinAssaultForce`、`AiMaxAssaultForce`；单位行中的 `hp/dmg/range/speed/cooldown/wood/mana` 分别控制生命、攻击、射程、移速、攻速、木材成本和魔法矿成本
-- **AI 难度加成**：`AiHardBonusWood`、`AiHardBonusMana`、`AiHardGatherMultiplier`；难度开关在开局面板，枚举和名称位于 `MapSettings`
+- 所有兵种/建筑/科技/采集数值集中在 `Assets/Resources/EresothRTSConfig.asset`（ScriptableObject，Inspector 直接编辑，策划调数值不动代码）；启动时由 `RuntimeConfig` 加载为静态字典，`GameConfig` 静态属性仅作代理转发——两处不要改出分歧
+- **平衡调试入口**：RTSConfig 资产中的 `initialWood` / `initialMana` / `gatherAmount` / `gatherTime` / `trainTime` / `constructionTime` / `aiAssaultInterval` / `aiMinAssaultForce` / `aiMaxAssaultForce` 等；单位行的 `hp/dmg/range/speed/cooldown/wood/mana` 分别控制生命、攻击、射程、移速、攻速、木材成本、魔法矿成本
+- **AI 难度加成**：`aiHardBonusWood` / `aiHardBonusMana` / `aiHardGatherMultiplier`；难度开关在开局面板，枚举和名称位于 `MapSettings`
 - 地图生成在 `Game.BuildWorld()`：随机/固定种子、地图大小与资源丰富度由 `MapSettings` 控制；中央魔法矿富集区用于分矿争夺
 
 ## 常见问题
 - **报错 "InvalidOperationException: ... Input"**：Project Settings → Player → Active Input Handling 改为 `Input Manager (Old)` 或 `Both`
-- **想从模板新建工程再拷代码**：只拷 `Assets/Scripts` 和 `Assets/Editor` 即可，同样执行第 4 步
+- **LLM 配置保存在哪 / 会不会上传到仓库**：保存在本机用户目录（菜单配置区显示完整路径，Windows 通常在 `C:\Users\<你>\AppData\LocalLow\...` 下），不在工程目录内，git 提交不到；仓库里只保留无真实密钥的 `llm_config.template.json`
+- **想从模板新建工程再拷代码**：只拷 `Assets/Scripts` 和 `Assets/Editor` 即可，同样执行第 3 步

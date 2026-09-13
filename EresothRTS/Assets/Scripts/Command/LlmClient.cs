@@ -21,12 +21,15 @@ namespace Eresoth
         bool configLoaded;
         public bool Available { get; private set; }
         public string UnavailableReason { get; private set; }
-        /// <summary>是否存在运行时保存的本机配置（抽屉里"清除本机配置"按钮用）。</summary>
-        public bool HasLocalConfig => File.Exists(LocalCfgPath);
+        /// <summary>是否存在运行时保存的本机配置（"清除本机配置"按钮用）。</summary>
+        public bool HasLocalConfig => File.Exists(LocalConfigPath);
+
+        /// <summary>运行时配置的本机保存路径（persistentDataPath，仓库目录之外），菜单界面直接展示。</summary>
+        public static string LocalConfigPath => Path.Combine(Application.persistentDataPath, "llm_config.json");
 
         const float TimeoutSeconds = 12f;
 
-        static string LocalCfgPath => Path.Combine(Application.persistentDataPath, "llm_config.json");
+        static string LocalCfgPath => LocalConfigPath;
         static string ProjectCfgPath => Path.Combine(Application.dataPath, "../llm_config.json");
 
         void OnEnable() { I = this; TryLoadConfig(); }
