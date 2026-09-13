@@ -85,7 +85,7 @@ namespace Eresoth
 
             // 动态词表
             sb.Append(",\"vocab\":{");
-            sb.Append("\"actions\":[\"move\",\"attack\",\"attack_move\",\"defend\",\"retreat\",\"focus_fire\",\"regroup\",\"hold\"],");
+            sb.Append("\"actions\":[\"move\",\"attack\",\"attack_move\",\"defend\",\"retreat\",\"focus_fire\",\"regroup\",\"hold\",\"scout\",\"reorganize\"],");
             sb.Append("\"economy_actions\":[\"train\",\"research\",\"build\",\"assign_workers\"],");
             sb.Append("\"metrics\":[\"enemy_count_near\",\"ally_health_ratio\",\"resource\",\"building_hp_ratio\",\"enemy_visible\",\"time_elapsed\"],");
             sb.Append("\"targets\":[");
@@ -105,11 +105,26 @@ namespace Eresoth
                 }
             }
             sb.Append("],");
+            AppendTargetRefs(sb);
             AppendUnits(sb, team);
             AppendTechs(sb, team);
             AppendBuildings(sb, team);
             sb.Append("}}");
             return sb.ToString();
+        }
+
+        /// <summary>模糊目标指代词表："英雄/兵种类别/敌我建筑"的说法 → target_ref 写法。</summary>
+        static void AppendTargetRefs(StringBuilder sb)
+        {
+            sb.Append("\"target_refs\":[\"hero\"");
+            foreach (UnitKind k in System.Enum.GetValues(typeof(UnitKind)))
+                if (k != UnitKind.Worker) sb.Append(",\"kind:").Append(k.ToString().ToLower()).Append("\"");
+            var keys = new System.Collections.Generic.List<string>(ReferenceResolver.BuildingAliases.Keys);
+            keys.Sort();
+            foreach (var side in new[] { "enemy", "own" })
+                foreach (var key in keys)
+                    sb.Append(",\"bld:").Append(key).Append(':').Append(side).Append("\"");
+            sb.Append("],");
         }
 
         static void AppendUnits(StringBuilder sb, Team team)
@@ -129,7 +144,18 @@ namespace Eresoth
                     first = false;
                     sb.Append("{\"id\":\"").Append(ud.id).Append("\",\"name\":\"").Append(ud.name)
                       .Append("\",\"kind\":\"").Append(ud.kind.ToString().ToLower())
-                      .Append("\",\"cost\":\"").Append(ud.wood).Append("木+").Append(ud.mana).Append("矿\"}");
+                      .Append("\",\"cost\":\"").Append(ud.wood).Append("木+").Append(ud.mana).Append("矿\"");
+                    if (ReferenceResolver.UnitAliases.TryGetValue(ud.id, out var als) && als.Length > 0)
+                    {
+                        sb.Append(",\"aliases\":[");
+                        for (int i = 0; i < als.Length; i++)
+                        {
+                            if (i > 0) sb.Append(',');
+                            sb.Append("\"").Append(als[i]).Append("\"");
+                        }
+                        sb.Append(']');
+                    }
+                    sb.Append('}');
                 }
             }
             sb.Append(']');
@@ -163,7 +189,21 @@ namespace Eresoth
                 if (!RuntimeConfig.Buildings.TryGetValue(k, out var bd)) continue;
                 if (!first) sb.Append(',');
                 first = false;
-                sb.Append("{\"kind\":\"").Append(k).Append("\",\"name\":\"").Append(bd.name).Append("\"}");
+                sb.Append("{\"kind\":\"").Append(k).Append("\",\"name\":\"").Append(bd.name).Append("\"");
+                var aliasKeys = new System.Collections.Generic.List<string>();
+                foreach (var kv in ReferenceResolver.BuildingAliases)
+                    if (System.Array.Exists(kv.Value, id => id == k)) aliasKeys.Add(kv.Key);
+                if (aliasKeys.Count > 0)
+                {
+                    sb.Append(",\"aliases\":[");
+                    for (int i = 0; i < aliasKeys.Count; i++)
+                    {
+                        if (i > 0) sb.Append(',');
+                        sb.Append("\"").Append(aliasKeys[i]).Append("\"");
+                    }
+                    sb.Append(']');
+                }
+                sb.Append('}');
             }
             sb.Append(']');
         }

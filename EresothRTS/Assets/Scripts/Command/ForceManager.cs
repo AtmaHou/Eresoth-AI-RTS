@@ -56,6 +56,68 @@ namespace Eresoth
             return null;
         }
 
+        /// <summary>模糊解析军团指代："军团一/一军团/1队/一队/第一军团/army_1"均可；解析失败返回 null。
+        /// "全军"类表述返回 null（由调用方展开为 AllForcesId）。</summary>
+        public Force Resolve(string idOrName)
+        {
+            var exact = Find(idOrName);
+            if (exact != null) return exact;
+            int idx = ReferenceResolver.ForceIndex(idOrName);
+            if (idx <= 0) return null;
+            var mine = OfTeam(Game.I.playerTeam);
+            // 序号对应该阵营军团列表位次（一军团=第 1 支，与命名一致）
+            return idx <= mine.Count ? mine[idx - 1] : null;
+        }
+
+        /// <summary>把指代展开为军团列表："全军/__all__"=该阵营全部军团；其余解析为单军团。</summary>
+        public List<Force> ResolveAll(string idOrName)
+        {
+            if (ReferenceResolver.IsAllForcesText(idOrName) || idOrName == ReferenceResolver.AllForcesId)
+                return OfTeam(Game.I.playerTeam);
+            var one = Resolve(idOrName);
+            var list = new List<Force>();
+            if (one != null) list.Add(one);
+            return list;
+        }
+
+        /// <summary>编制调整：把来源军团（或除目标外全部）中符合筛选的单位编入目标军团。
+        /// ratio(0~1) 为抽调比例（0=全部符合者）；kindFilter/unitRef 进一步限定兵种/英雄。返回调动人数。</summary>
+        public int Reorganize(Force dest, string sourceId, float ratio, UnitKind? kindFilter, string unitRef)
+        {
+            if (dest == null) return 0;
+            var sources = new List<Force>();
+            if (ReferenceResolver.IsAllForcesText(sourceId) || sourceId == ReferenceResolver.AllForcesId
+                || string.IsNullOrEmpty(sourceId))
+                sources = OfTeam(dest.team).FindAll(f => f != dest);
+            else
+            {
+                var s = Resolve(sourceId);
+                if (s != null && s != dest) sources.Add(s);
+            }
+            var picked = new List<Unit>();
+            foreach (var s in sources)
+                foreach (var u in s.units)
+                {
+                    if (u == null || !u.Alive) continue;
+                    if (kindFilter.HasValue && u.def.kind != kindFilter.Value) continue;
+                    if (unitRef == "hero" && !u.def.hero) continue;
+                    picked.Add(u);
+                }
+            if (picked.Count == 0) return 0;
+            int take = picked.Count;
+            if (ratio > 0f && ratio < 1f) take = Mathf.Max(1, Mathf.RoundToInt(picked.Count * ratio));
+            take = Mathf.Min(take, picked.Count);
+            // 均匀抽取（跨兵种错位取样），避免抽走的一半全是同一兵种
+            var chosen = new HashSet<Unit>();
+            for (int i = 0; i < take; i++)
+            {
+                int idx = picked.Count == take ? i : Mathf.Min(picked.Count - 1, Mathf.FloorToInt(i * picked.Count / (float)take));
+                chosen.Add(picked[idx]);
+            }
+            foreach (var u in chosen) Assign(u, dest);
+            return chosen.Count;
+        }
+
         /// <summary>某阵营的所有军团。</summary>
         public List<Force> OfTeam(Team team)
         {

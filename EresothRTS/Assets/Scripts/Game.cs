@@ -647,10 +647,14 @@ namespace Eresoth
 
         /// <summary>AI 建建筑：固定槽位；民居/箭塔可建多座，其余同 kind 全场一座。</summary>
         public bool BuildStructure(Team team, BuildingDef def)
+            => TrySpawnStructure(team, def) != null;
+
+        /// <summary>建建筑并返回实例（失败返回 null）：供指挥层继续抽调工人/判定完成。</summary>
+        public Building TrySpawnStructure(Team team, BuildingDef def)
         {
             bool multi = def.kind == "tower" || def.kind == "house" || def.kind == "resource_hub";
             if (!multi && BuildingOfKind(team, def.kind) != null)
-            { if (team == playerTeam) Toast($"{def.name}已建成"); return false; }
+            { if (team == playerTeam) Toast($"{def.name}已建成"); return null; }
 
             Vector3 c = baseCenter[(int)team];
             foreach (var off in BuildSlots)
@@ -662,21 +666,25 @@ namespace Eresoth
                     if (Vector3.Distance(p, b.transform.position) < 5f) { occupied = true; break; }
                 if (occupied) continue;
 
-                if (!TrySpend((int)team, def.wood, def.mana)) return false;
+                if (!TrySpend((int)team, def.wood, def.mana)) return null;
                 var building = Building.Spawn(team, def, p, false);
                 AssignBuilders(team, building);
-                return true;
+                return building;
             }
             if (team == playerTeam) Toast("基地周围没有空地");
-            return false;
+            return null;
         }
 
         public bool BuildForwardResourceHub(Team team)
+            => TryBuildForwardResourceHub(team) != null;
+
+        /// <summary>开分矿并返回收集站实例（失败返回 null）。</summary>
+        public Building TryBuildForwardResourceHub(Team team)
         {
             var def = GameConfig.Lumber;
-            if (buildings.FindAll(b => b.team == team && b.kind == "resource_hub").Count >= 3) return false;
+            if (buildings.FindAll(b => b.team == team && b.kind == "resource_hub").Count >= 3) return null;
             var hall = Hall(team);
-            if (hall == null) return false;
+            if (hall == null) return null;
             ResourceNode best = null; float bestScore = float.MaxValue;
             foreach (var n in nodes)
             {
@@ -687,18 +695,48 @@ namespace Eresoth
                     && Vector3.Distance(b.transform.position, n.transform.position) < 12f)) continue;
                 if (d < bestScore) { best = n; bestScore = d; }
             }
-            if (best == null || !TrySpend((int)team, def.wood, def.mana)) return false;
+            if (best == null || !TrySpend((int)team, def.wood, def.mana)) return null;
             Vector3 dir = (best.transform.position - hall.transform.position).normalized;
             Vector3 p = best.transform.position - dir * 5f;
             p.y = TerrainHeight(p.x, p.z);
             if (!CanPlaceAt(team, def, p, out _))
             {
                 wood[(int)team] += def.wood; mana[(int)team] += def.mana;
-                return false;
+                return null;
             }
             var building = Building.Spawn(team, def, p, false);
             AssignBuilders(team, building);
-            return true;
+            return building;
+        }
+
+        /// <summary>指挥层抽工人去工地：空闲者优先，不足则打断最近的采集者（显式军令允许打断）。
+        /// 返回实际抽到的工人数。</summary>
+        public int PullWorkersToConstruct(Team team, Building building, int count)
+        {
+            if (building == null || !building.constructing || count <= 0) return 0;
+            var candidates = units.FindAll(u => u.team == team && u.def.worker && u.Alive);
+            candidates.Sort((a, b) => Vector3.Distance(a.transform.position, building.transform.position)
+                .CompareTo(Vector3.Distance(b.transform.position, building.transform.position)));
+            int assigned = 0;
+            foreach (var u in candidates)   // 第一轮：空闲工人
+            {
+                if (assigned >= count) break;
+                var w = u.GetComponent<Worker>();
+                if (w == null || w.state != Worker.State.Idle) continue;
+                w.BuildAt(building);
+                assigned++;
+            }
+            foreach (var u in candidates)   // 第二轮：打断最近的采集工人
+            {
+                if (assigned >= count) break;
+                var w = u.GetComponent<Worker>();
+                if (w == null || w.state == Worker.State.Idle
+                    || w.state == Worker.State.Constructing || w.state == Worker.State.Building) continue;
+                w.StopGather();
+                w.BuildAt(building);
+                assigned++;
+            }
+            return assigned;
         }
 
         /// <summary>校验玩家自由选址：地图边界、主基地半径、与其他建筑/资源点不重叠。err 为失败原因。</summary>

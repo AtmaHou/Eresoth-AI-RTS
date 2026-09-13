@@ -17,7 +17,7 @@ namespace Eresoth
         /// <summary>鼠标悬停在展开的指挥栏上：点击不穿透到世界。</summary>
         public static bool PointerOver { get; private set; }
 
-        struct ChatMsg { public string who; public string text; public float time; }
+        struct ChatMsg { public string who; public string text; public string raw; public bool rawOpen; public float time; }
 
         readonly List<ChatMsg> msgs = new();
         string input = "";
@@ -25,23 +25,26 @@ namespace Eresoth
         bool focusInput;
         bool collapsed;             // 收拢为右侧把手（世界操作不被遮挡）
         GUIStyle style;
+        GUIStyle rawStyle;
         Vector2 scroll;
         string logPath;
         readonly Queue<string> recentTurns = new();   // 多轮上下文（最近 4 轮）
 
-        /// <summary>滚动建议池：环形展播可尝试的命令（覆盖军事/经济/条件触发）。</summary>
+        /// <summary>滚动建议池：环形展播可尝试的命令（覆盖军事/经济/编制/侦察/队列）。</summary>
         static readonly string[] Suggestions =
         {
             "一军团进攻敌方主基地，遇到主力就撤",
             "二军团去东矿，伤亡过半就撤退",
-            "全军集火英雄",
-            "造4个步兵再补2个长弓手",
-            "研究攻击升级",
-            "建资源收集站开分矿",
+            "全军集火敌方英雄",
+            "派个骑兵去侦查一圈",
+            "所有的骑兵编入二队",
+            "一军团一半的兵编入二队",
+            "造4个弓箭手再研究攻击科技",
+            "依次造2个兵营和3个箭塔",
+            "拉两个农夫去开个分矿",
+            "所有农民按比分配采资源",
             "工人去采魔法矿",
-            "骑兵绕后骚扰，主力正面压上去",
-            "一军团驻守中矿待命",
-            "全军集结到撤退点",
+            "全军撤退",
         };
 
         void OnEnable()
@@ -66,9 +69,9 @@ namespace Eresoth
             {
                 LlmClient.I.Parse(text, digest, history,
                     onJson: json => HandleLlmJson(text, digest, json),
-                    onError: err => HandleFallback(text, digest, err));
+                    onError: (err, raw) => HandleFallback(text, digest, err, raw));
             }
-            else HandleFallback(text, digest, LlmClient.I != null ? LlmClient.I.UnavailableReason : "LLM 不可用");
+            else HandleFallback(text, digest, LlmClient.I != null ? LlmClient.I.UnavailableReason : "LLM 不可用", null);
         }
 
         void HandleLlmJson(string text, string digest, string json)
@@ -77,12 +80,12 @@ namespace Eresoth
             DebugCommandRunner.CommandRequest req = null;
             try { req = JsonUtility.FromJson<DebugCommandRunner.CommandRequest>(json); } catch { }
 
-            if (req == null) { HandleFallback(text, digest, "模型输出非法 JSON"); return; }
+            if (req == null) { HandleFallback(text, digest, "模型输出非法 JSON", json); return; }
 
             // 追问分支：不执行任何军令
             if (req.clarification_needed && !string.IsNullOrEmpty(req.question))
             {
-                Add("参谋", req.question);
+                Add("参谋", req.question, json);
                 Log(text, digest, json, "clarification");
                 PushTurn(text, req.question);
                 return;
@@ -92,39 +95,40 @@ namespace Eresoth
             int executed = Execute(req);
             string reply = !string.IsNullOrEmpty(req.player_reply) ? req.player_reply
                 : executed > 0 ? "收到，已下达。" : "没有可执行的指令。";
-            Add("参谋", reply);
+            Add("参谋", reply, json);
             Log(text, digest, json, executed > 0 ? "executed" : "no-op");
             PushTurn(text, reply);
         }
 
-        void HandleFallback(string text, string digest, string reason)
+        void HandleFallback(string text, string digest, string reason, string raw)
         {
             waiting = false;
             var req = LocalFallbackParser.TryParse(text);
             if (req == null)
             {
-                Add("参谋", $"没听懂（{reason}）。试试：\"一军团防守家门口\"、\"二军团去打东矿\"、\"造4个弓箭手\"。");
+                Add("参谋", $"没听懂（{reason}）。试试：\"一军团防守家门口\"、\"二军团去打东矿\"、\"造4个弓箭手\"。", raw);
                 Log(text, digest, null, "fallback_failed: " + reason);
                 return;
             }
             int executed = Execute(req);
-            Add("参谋", (req.player_reply ?? "收到。") + "［离线兜底］");
+            Add("参谋", (req.player_reply ?? "收到。") + "［离线兜底］", raw);
             Log(text, digest, null, $"fallback_executed({executed}): {reason}");
             PushTurn(text, req.player_reply ?? "");
         }
 
-        /// <summary>执行解析结果：军事军令 + 经济计划逐条提交，返回成功条数。</summary>
+        /// <summary>执行解析结果：军事军令 + 经济计划逐条提交，返回成功条数。"全军"在此展开为每军团一条。</summary>
         int Execute(DebugCommandRunner.CommandRequest req)
         {
             int ok = 0;
             if (OrderDispatcher.I == null) return 0;
             foreach (var dto in req.orders)
-            {
-                var o = DebugCommandRunner.Map(dto, req.player_text, out string err);
-                if (o == null) { Add("系统", $"军令无效：{err}"); continue; }
-                if (OrderDispatcher.I.SubmitOrder(o)) ok++;
-                else Add("系统", $"军令被拒：{o.failReason}");
-            }
+                foreach (var expanded in DebugCommandRunner.ExpandForces(dto))
+                {
+                    var o = DebugCommandRunner.Map(expanded, req.player_text, out string err);
+                    if (o == null) { Add("系统", $"军令无效：{err}"); continue; }
+                    if (OrderDispatcher.I.SubmitOrder(o)) ok++;
+                    else Add("系统", $"军令被拒：{o.failReason}");
+                }
             if (req.economy != null)
                 foreach (var dto in req.economy)
                 {
@@ -142,9 +146,9 @@ namespace Eresoth
             while (recentTurns.Count > 4) recentTurns.Dequeue();
         }
 
-        void Add(string who, string text)
+        void Add(string who, string text, string raw = null)
         {
-            msgs.Add(new ChatMsg { who = who, text = text, time = Time.time });
+            msgs.Add(new ChatMsg { who = who, text = text, raw = raw, time = Time.time });
             if (msgs.Count > 50) msgs.RemoveAt(0);
             scroll.y = float.MaxValue;   // 滚到底
         }
@@ -165,6 +169,28 @@ namespace Eresoth
         static string J(string s)
             => "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n") + "\"";
 
+        /// <summary>单条消息高度（正文 42 + 折叠的原始输出行）。</summary>
+        static float MsgHeight(ChatMsg m, float width)
+        {
+            float h = 42;
+            if (!string.IsNullOrEmpty(m.raw))
+            {
+                h += 17;
+                if (m.rawOpen) h += RawHeight(m.raw, width - 10) + 8;
+            }
+            return h;
+        }
+
+        /// <summary>原始输出展示高度：按字符数折行估算，封顶 6 行。</summary>
+        static float RawHeight(string raw, float width)
+        {
+            int charsPerLine = Mathf.Max(20, (int)(width / 6.5f));
+            int lines = 0;
+            foreach (var seg in raw.Split('\n'))
+                lines += Mathf.Max(1, Mathf.CeilToInt(seg.Length / (float)charsPerLine));
+            return Mathf.Min(lines, 6) * 14 + 4;
+        }
+
         // ---------------- UI ----------------
 
         /// <summary>高频命令 tips：结合本局军团名生成，点击填入输入框。</summary>
@@ -180,13 +206,19 @@ namespace Eresoth
             return new List<string>
             {
                 $"{f1}防守家门口",
-                $"{f1}进攻敌方主基地",
+                $"{f1}攻击敌方主基地",
                 $"{f2}去东矿",
-                "全军集火英雄",
+                "全军集火敌方英雄",
                 "全军撤退",
                 "造4个弓箭手",
                 "研究攻击",
                 "工人采魔法矿",
+                "派个骑兵去侦查一圈",
+                "所有的骑兵编入二队",
+                $"{f1}一半的兵编入{f2}",
+                "拉两个农夫去开个分矿",
+                "所有农民按比分配采资源",
+                "依次造2个兵营和3个箭塔",
             };
         }
 
@@ -219,6 +251,12 @@ namespace Eresoth
             PointerOver = r.Contains(Event.current.mousePosition);
             GUI.Box(r, GUIContent.none);
 
+            if (rawStyle == null)
+            {
+                rawStyle = new GUIStyle(GUI.skin.label) { fontSize = 11, wordWrap = true };
+                rawStyle.normal.textColor = new Color(.75f, .75f, .78f);
+            }
+
             // 头部：标题 + LLM 状态 + 收拢
             bool ready = LlmClient.I != null && LlmClient.I.Available;
             GUI.color = ready ? new Color(.6f, 1f, .7f) : new Color(1f, .7f, .5f);
@@ -226,19 +264,34 @@ namespace Eresoth
             GUI.color = Color.white;
             if (GUI.Button(new Rect(x + w - 88, top + 4, 80, 22), "收拢 —")) collapsed = true;
 
-            // 消息区
-            var viewH = msgs.Count * 42 + 20;
+            // 消息区（带"原始输出"折叠：LLM 原始 JSON / API 错误默认收起，点开可查）
+            float viewH = 8;
+            for (int i = 0; i < msgs.Count; i++) viewH += MsgHeight(msgs[i], w - 46);
             scroll = GUI.BeginScrollView(new Rect(x + 8, top + 28, w - 16, msgH),
                 scroll, new Rect(0, 0, w - 40, Mathf.Max(viewH, msgH - 4)));
             float y = 4;
-            foreach (var m in msgs)
+            for (int i = 0; i < msgs.Count; i++)
             {
+                var m = msgs[i];
                 GUI.color = m.who == "你" ? new Color(.6f, .9f, 1f)
                     : m.who == "参谋" ? new Color(.6f, 1f, .7f) : new Color(1f, .8f, .5f);
                 GUI.Label(new Rect(0, y, w - 46, 40), $"{m.who}：{m.text}", style);
+                GUI.color = Color.white;
                 y += 42;
+                if (!string.IsNullOrEmpty(m.raw))
+                {
+                    if (GUI.Button(new Rect(0, y, 110, 15), m.rawOpen ? "▾ 收起原始输出" : "▸ 查看原始输出"))
+                    { m.rawOpen = !m.rawOpen; msgs[i] = m; }
+                    y += 17;
+                    if (m.rawOpen)
+                    {
+                        float rh = RawHeight(m.raw, w - 56);
+                        GUI.Box(new Rect(0, y, w - 44, rh + 6), GUIContent.none);
+                        GUI.Label(new Rect(4, y + 3, w - 52, rh), m.raw, rawStyle);
+                        y += rh + 8;
+                    }
+                }
             }
-            GUI.color = Color.white;
             GUI.EndScrollView();
 
             // 输入行

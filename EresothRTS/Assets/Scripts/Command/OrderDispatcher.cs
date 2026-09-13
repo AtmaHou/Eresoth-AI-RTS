@@ -21,16 +21,26 @@ namespace Eresoth
         void OnEnable() { I = this; }
         void OnDestroy() { if (I == this) I = null; }
 
-        /// <summary>提交军令：校验 → 仲裁 → 生效。返回是否受理（拒绝原因写在 failReason）。</summary>
+        /// <summary>提交军令：校验 → 仲裁 → 生效。返回是否受理（拒绝原因写在 failReason）。
+        /// 经济军令走 EconomyPlanner（不需要军团）；编制调整即时执行；军事军令绑定军团。</summary>
         public bool SubmitOrder(Order o)
         {
             if (o == null) return false;
             o.createdAt = Time.time;
             o.id = $"ord_{nextId++:000}";
 
-            // --- 校验 ---
-            var force = ForceManager.I != null ? ForceManager.I.Find(o.forceId) : null;
-            if (force == null) return Reject(o, $"军团不存在：{o.forceId}");
+            // --- 经济军令：独立通路，校验参数后交给 EconomyPlanner 持续执行 ---
+            if (o.IsEconomy) return SubmitEconomy(o);
+
+            // --- 编制调整：提交即执行完毕 ---
+            if (o.action == OrderAction.Reorganize) return SubmitReorganize(o);
+
+            // --- 军事军令：模糊解析军团（"军团一/1队/army_1"均可） ---
+            if (ForceManager.I == null) return Reject(o, "军团系统未就绪");
+            var force = ForceManager.I.Resolve(o.forceId);
+            if (force == null)
+                return Reject(o, $"军团不存在：{o.forceId}（可用：{ListForces()}；先按 F10 或说\"全军集结\"编组）");
+            o.forceId = force.id;
             if (force.AliveCount == 0) return Reject(o, $"{force.name} 已经没有可指挥的单位");
             if (!string.IsNullOrEmpty(o.targetId) && !SemanticMap.Exists(o.targetId))
                 return Reject(o, $"目标无法识别：{o.targetId}");
@@ -57,6 +67,46 @@ namespace Eresoth
             Log(o);
             if (force.team == Game.I.playerTeam)
                 Game.I.Toast($"{force.name}：{o.Describe()}");
+            return true;
+        }
+
+        string ListForces()
+        {
+            if (ForceManager.I == null || Game.I == null) return "无";
+            var fs = ForceManager.I.OfTeam(Game.I.playerTeam);
+            if (fs.Count == 0) return "尚未编组（按 F10 自动编组）";
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < fs.Count; i++)
+            {
+                if (i > 0) sb.Append('、');
+                sb.Append(fs[i].name);
+            }
+            return sb.ToString();
+        }
+
+        bool SubmitEconomy(Order o)
+        {
+            string err = ValidateEconomy(o);
+            if (err != null) return Reject(o, err);
+            if (EconomyPlanner.I == null) return Reject(o, "经济计划器未就绪");
+            o.state = OrderState.Validated;
+            EconomyPlanner.I.Activate(o);
+            Log(o);
+            Game.I.Toast($"经济计划：{o.Describe()}");
+            return true;
+        }
+
+        bool SubmitReorganize(Order o)
+        {
+            if (ForceManager.I == null) return Reject(o, "军团系统未就绪");
+            var dest = ForceManager.I.Resolve(o.forceId);
+            if (dest == null) return Reject(o, $"目标军团不存在：{o.forceId}");
+            int moved = ForceManager.I.Reorganize(dest, o.sourceId, o.ratio, o.unitFilter, o.targetRef);
+            if (moved == 0) return Reject(o, "没有符合筛选条件的可调动单位");
+            o.forceId = dest.id;
+            o.state = OrderState.Completed;
+            Log(o);
+            Game.I.Toast($"✔ 编制调整：{moved} 个单位编入 {dest.name}");
             return true;
         }
 
@@ -148,15 +198,30 @@ namespace Eresoth
             {
                 case OrderAction.Train:
                     if (string.IsNullOrEmpty(o.targetId)) return "未指定训练兵种";
-                    return RuntimeConfig.Units.ContainsKey(o.targetId) ? null : $"未知兵种：{o.targetId}";
+                    if (!RuntimeConfig.Units.ContainsKey(o.targetId))
+                    {
+                        // 别名容错："弓箭手"等常见叫法归一到本局兵种 id
+                        string aliasId = ReferenceResolver.ResolveTrainableUnitId(Game.I.playerTeam, o.targetId);
+                        if (aliasId == null) return $"未知兵种：{o.targetId}";
+                        o.targetId = aliasId;
+                    }
+                    return null;
                 case OrderAction.Research:
                     if (string.IsNullOrEmpty(o.targetId)) return "未指定研究科技";
                     return GameConfig.Techs.ContainsKey(o.targetId) ? null : $"未知科技：{o.targetId}";
                 case OrderAction.Build:
                     if (string.IsNullOrEmpty(o.targetId)) return "未指定建筑";
-                    return RuntimeConfig.Buildings.ContainsKey(o.targetId) ? null : $"未知建筑：{o.targetId}";
+                    if (!RuntimeConfig.Buildings.ContainsKey(o.targetId))
+                    {
+                        string aliasKind = ReferenceResolver.ResolveBuildableKind(Game.I.playerTeam, o.targetId);
+                        if (aliasKind == null) return $"未知建筑：{o.targetId}";
+                        o.targetId = aliasKind;
+                    }
+                    return null;
                 case OrderAction.AssignWorkers:
-                    if (o.resource != "wood" && o.resource != "mana") return $"未知资源类型：{o.resource}";
+                    if (o.resource != "wood" && o.resource != "mana" && o.resource != "both")
+                        return $"未知资源类型：{o.resource}";
+                    if (o.ratio < 0f || o.ratio > 1f) return $"占比非法：{o.ratio}";
                     return null;
                 default:
                     return null;

@@ -18,12 +18,13 @@ namespace Eresoth
         void OnEnable() { I = this; }
         void OnDestroy() { if (I == this) I = null; }
 
-        /// <summary>登记经济军令（OrderDispatcher 校验通过后调用）。同类非训练计划互相替换。</summary>
+        /// <summary>登记经济军令（OrderDispatcher 校验通过后调用）。
+        /// 同类非训练计划互相替换，但只替换同批次的："依次造A和B"的队列不会被后一条普通建造命令清掉。</summary>
         public void Activate(Order o)
         {
             if (o.action != OrderAction.Train)
                 for (int i = plans.Count - 1; i >= 0; i--)
-                    if (plans[i].action == o.action && !plans[i].IsTerminal)
+                    if (plans[i].action == o.action && plans[i].batchId == o.batchId && !plans[i].IsTerminal)
                         plans[i].state = OrderState.Overridden;
             plans.Add(o);
             o.state = OrderState.Executing;
@@ -49,8 +50,22 @@ namespace Eresoth
                 if (o.IsTerminal) { plans.RemoveAt(i); continue; }
                 if (o.expiresAt > 0f && Time.time > o.expiresAt)
                 { o.state = OrderState.Expired; o.failReason = "超过时限"; continue; }
+                if (HasEarlierPendingInBatch(o)) continue;   // "依次造A和B"：等前序计划完成
                 Tick(o);
             }
+        }
+
+        /// <summary>建造/训练队列：同批次内 sequence 较小的计划未终态时，本计划排队等待。</summary>
+        bool HasEarlierPendingInBatch(Order o)
+        {
+            if (string.IsNullOrEmpty(o.batchId)) return false;
+            for (int i = 0; i < plans.Count; i++)
+            {
+                var p = plans[i];
+                if (p == o || p.batchId != o.batchId || p.sequence >= o.sequence) continue;
+                if (!p.IsTerminal) return true;
+            }
+            return false;
         }
 
         void Tick(Order o)
@@ -96,18 +111,27 @@ namespace Eresoth
                 {
                     if (!RuntimeConfig.Buildings.TryGetValue(o.targetId, out var bd))
                     { Fail(o, $"未知建筑 {o.targetId}"); return; }
-                    // 已存在（含施工中）即视为计划完成
+                    // 完成判定：同类建筑（含施工中）达到 count 座即完成
+                    int want = Mathf.Max(1, o.count);
+                    int have = 0;
                     foreach (var b in g.buildings)
-                        if (b != null && b.Alive && b.team == team && b.kind == o.targetId) { Done(o); return; }
-                    if (o.targetId == "resource_hub") g.BuildForwardResourceHub(team);
-                    else g.BuildStructure(team, bd);
-                    // 失败（资源/空地不足）静默重试，成功则由下一跳的"已存在"判定完成
+                        if (b != null && b.Alive && b.team == team && b.kind == o.targetId) have++;
+                    if (have >= want) { Done(o); return; }
+                    Building spawned = o.targetId == "resource_hub"
+                        ? g.TryBuildForwardResourceHub(team)
+                        : g.TrySpawnStructure(team, bd);
+                    if (spawned != null && o.workerCount > 0)
+                        g.PullWorkersToConstruct(team, spawned, o.workerCount);
+                    // 失败（资源/空地不足）静默重试，成功则由下一跳的"已存在"判定推进
                     break;
                 }
                 case OrderAction.AssignWorkers:
                 {
-                    RebalanceWorkers(g, team, o.resource == "mana" ? "mana" : "wood",
-                        Mathf.Clamp01(o.ratio <= 0f ? 0.5f : o.ratio));
+                    if (o.resource == "both")
+                        RebalanceBothResources(g, team, Mathf.Clamp01(o.ratio <= 0f ? 0.6f : o.ratio), o.workerCount);
+                    else
+                        RebalanceWorkers(g, team, o.resource == "mana" ? "mana" : "wood",
+                            Mathf.Clamp01(o.ratio <= 0f ? 0.5f : o.ratio), o.workerCount);
                     break;   // 持续计划：始终生效直到被替换/取消
                 }
             }
@@ -119,8 +143,10 @@ namespace Eresoth
         readonly Dictionary<string, int> trainedSoFar = new();
         readonly Dictionary<string, int> researchStart = new();
 
-        /// <summary>把空闲工人按比例分配给两种资源：目标 ratio 采 targetKind，其余采另一种。</summary>
-        void RebalanceWorkers(Game g, Team team, string targetKind, float ratio)
+        /// <summary>把工人按目标比例分配：workerCount=0 只动空闲工人（不打扰在采的）；
+        /// workerCount&gt;0 抽 N 个（空闲优先，不足打断最近采集者）；workerCount=-1 全体重排。
+        /// targetKind 采 targetRatio，其余采另一种。</summary>
+        void RebalanceWorkers(Game g, Team team, string targetKind, float ratio, int workerCount)
         {
             var idle = new List<Unit>();
             int onTarget = 0, total = 0;
@@ -135,7 +161,34 @@ namespace Eresoth
             }
             if (total == 0) return;
             int wantTarget = Mathf.RoundToInt(total * ratio);
-            // 只动空闲工人，不打断正在采集的（避免抖动）
+            // 显式数量：空闲优先，不够则按距离打断采集者
+            if (workerCount > 0)
+            {
+                var cand = new List<Unit>(idle);
+                if (cand.Count < workerCount)
+                    foreach (var u in g.units)
+                    {
+                        if (cand.Count >= workerCount) break;
+                        if (u == null || !u.Alive || u.team != team || !u.def.worker || cand.Contains(u)) continue;
+                        var w = u.GetComponent<Worker>();
+                        if (w == null || w.state == Worker.State.Idle
+                            || w.state == Worker.State.Constructing || w.state == Worker.State.Building) continue;
+                        cand.Add(u);
+                    }
+                cand.Sort((a, b) => a.GetInstanceID().CompareTo(b.GetInstanceID()));   // 稳定顺序，避免抖动
+                foreach (var u in cand)
+                {
+                    if (workerCount <= 0) break;
+                    string kind = onTarget < wantTarget ? targetKind : (targetKind == "mana" ? "wood" : "mana");
+                    var node = g.NearestNode(kind, u.transform.position) ?? g.NearestNodeAny(u.transform.position);
+                    if (node == null) return;
+                    u.GetComponent<Worker>().GatherAt(node);
+                    if (kind == targetKind) onTarget++;
+                    workerCount--;
+                }
+                return;
+            }
+            // 未指定数量：只动空闲工人，不打断正在采集的（避免抖动）
             foreach (var u in idle)
             {
                 string kind = onTarget < wantTarget ? targetKind : (targetKind == "mana" ? "wood" : "mana");
@@ -144,6 +197,53 @@ namespace Eresoth
                 if (node == null) return;
                 u.GetComponent<Worker>().GatherAt(node);
                 if (kind == targetKind) onTarget++;
+            }
+        }
+
+        /// <summary>"所有农民采资源"：按 manaRatio 采魔法矿、其余采木。
+        /// workerCount=-1 时全体重排（超编工种强制改派）；否则只安排空闲工人。</summary>
+        void RebalanceBothResources(Game g, Team team, float manaRatio, int workerCount)
+        {
+            var workers = new List<(Unit u, Worker w, string kind)>();
+            foreach (var u in g.units)
+            {
+                if (u == null || !u.Alive || u.team != team || !u.def.worker) continue;
+                var w = u.GetComponent<Worker>();
+                if (w == null) continue;
+                string kind = w.node != null ? w.node.kind : null;
+                workers.Add((u, w, kind));
+            }
+            if (workers.Count == 0) return;
+            int wantMana = Mathf.RoundToInt(workers.Count * manaRatio);
+            int onMana = 0;
+            foreach (var (_, _, kind) in workers) if (kind == "mana") onMana++;
+
+            foreach (var (u, w, kind) in workers)
+            {
+                bool isIdle = w.state == Worker.State.Idle;
+                if (!isIdle && workerCount != -1) continue;          // 非全体模式：不打扰在采的
+                if (isIdle)
+                {
+                    string assign = onMana < wantMana ? "mana" : "wood";
+                    var node = g.NearestNode(assign, u.transform.position) ?? g.NearestNodeAny(u.transform.position);
+                    if (node == null) continue;
+                    w.GatherAt(node);
+                    if (assign == "mana") onMana++;
+                }
+                else if (kind != null)
+                {
+                    // 全体重排：超编的工种改派到另一种资源
+                    if (kind == "mana" && onMana > wantMana)
+                    {
+                        var node = g.NearestNode("wood", u.transform.position);
+                        if (node != null) { w.GatherAt(node); onMana--; }
+                    }
+                    else if (kind == "wood" && onMana < wantMana)
+                    {
+                        var node = g.NearestNode("mana", u.transform.position);
+                        if (node != null) { w.GatherAt(node); onMana++; }
+                    }
+                }
             }
         }
 

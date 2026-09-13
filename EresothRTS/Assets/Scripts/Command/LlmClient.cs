@@ -91,15 +91,16 @@ namespace Eresoth
             TryLoadConfig();
         }
 
-        /// <summary>解析玩家指令：构建 Prompt → 调 API → 回调原始 JSON（成功）或 null（失败，走兜底）。</summary>
-        public void Parse(string playerText, string digestJson, string historyText, Action<string> onJson, Action<string> onError)
+        /// <summary>解析玩家指令：构建 Prompt → 调 API → 回调原始 JSON（成功）或 null（失败，走兜底）。
+        /// onError 附带 API 原始返回/错误详情，供指挥台"原始输出"折叠展示。</summary>
+        public void Parse(string playerText, string digestJson, string historyText, Action<string> onJson, Action<string, string> onError)
         {
             if (!configLoaded) TryLoadConfig();
-            if (!Available) { onError?.Invoke(UnavailableReason); return; }
+            if (!Available) { onError?.Invoke(UnavailableReason, null); return; }
             StartCoroutine(Request(PromptBuilder.SystemPrompt(), PromptBuilder.UserPrompt(playerText, digestJson, historyText), onJson, onError));
         }
 
-        IEnumerator Request(string system, string user, Action<string> onJson, Action<string> onError)
+        IEnumerator Request(string system, string user, Action<string> onJson, Action<string, string> onError)
         {
             string body = "{"
                 + "\"model\":\"" + cfg.model + "\","
@@ -119,11 +120,18 @@ namespace Eresoth
             yield return req.SendWebRequest();
 
             if (req.result != UnityWebRequest.Result.Success)
-            { onError?.Invoke($"API 请求失败：{req.error}"); yield break; }
+            { onError?.Invoke($"API 请求失败：{req.error}", Truncate(req.downloadHandler?.text)); yield break; }
 
             string content = ExtractContent(req.downloadHandler.text);
-            if (content == null) { onError?.Invoke("API 返回格式异常"); yield break; }
+            if (content == null) { onError?.Invoke("API 返回格式异常", Truncate(req.downloadHandler.text)); yield break; }
             onJson?.Invoke(content);
+        }
+
+        static string Truncate(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return null;
+            const int max = 2000;
+            return s.Length <= max ? s : s.Substring(0, max) + "…";
         }
 
         /// <summary>从 OpenAI 响应中取 choices[0].message.content（最小解析，不引第三方库）。</summary>

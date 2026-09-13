@@ -115,6 +115,7 @@ namespace Eresoth
                 case OrderAction.FocusFire: DoFocusFire(f, o); break;
                 case OrderAction.Regroup:   DoRegroup(f, o); break;
                 case OrderAction.Hold:      DoHold(f, o); break;
+                case OrderAction.Scout:     DoScout(f, o); break;
             }
         }
 
@@ -129,6 +130,18 @@ namespace Eresoth
 
         void DoAttackMove(Force f, Order o, Vector3 dest)
         {
+            // 带模糊目标指代的推进：优先朝解析出的目标打（"全军压上去拆敌方箭塔"）
+            if (!string.IsNullOrEmpty(o.targetRef))
+            {
+                if (ReferenceResolver.TryResolveRuntimeTarget(o.targetRef, f.team, out var rt) && rt.Alive)
+                {
+                    LogEngaged(f, o);
+                    Issue(f, o, u => { if ((object)u.target != rt) u.CommandAttack(rt); });
+                }
+                else
+                    OrderDispatcher.I.Complete(o, OrderState.Completed, "目标已消灭或不可见");
+                return;
+            }
             Issue(f, o, u => { if (!u.attackMove) u.CommandAttackMove(dest); });
             if (Vector3.Distance(f.Centroid, dest) < ArriveDist)
                 OrderDispatcher.I.Complete(o, OrderState.Completed);
@@ -136,6 +149,20 @@ namespace Eresoth
 
         void DoAttack(Force f, Order o, Vector3 dest)
         {
+            // 模糊目标指代优先（"集火英雄""拆敌方的箭塔"）：解析到可见目标就全军集火
+            if (!string.IsNullOrEmpty(o.targetRef))
+            {
+                if (ReferenceResolver.TryResolveRuntimeTarget(o.targetRef, f.team, out var rt) && rt.Alive)
+                {
+                    LogEngaged(f, o);
+                    Issue(f, o, u => { if ((object)u.target != rt) u.CommandAttack(rt); });
+                }
+                else if (!Game.I.units.Exists(u => u != null && u.Alive && u.team != f.team))
+                    OrderDispatcher.I.Complete(o, OrderState.Completed, "敌军已全灭");
+                else
+                    OrderDispatcher.I.Complete(o, OrderState.Failed, "目标不可见或已消失");
+                return;
+            }
             // 目标点附近的敌人（5 半径内最近）：有则全军集火该目标，无则推进到目标点
             var tgt = NearestEnemy(f.team, dest, 5f);
             if (tgt != null)
@@ -182,6 +209,18 @@ namespace Eresoth
 
         void DoFocusFire(Force f, Order o)
         {
+            // 模糊目标指代（"集火英雄"）：按指代解析，不再自行选目标
+            if (!string.IsNullOrEmpty(o.targetRef))
+            {
+                if (ReferenceResolver.TryResolveRuntimeTarget(o.targetRef, f.team, out var rt) && rt.Alive)
+                {
+                    LogEngaged(f, o);
+                    Issue(f, o, u => { if ((object)u.target != rt) u.CommandAttack(rt); });
+                }
+                else
+                    OrderDispatcher.I.Complete(o, OrderState.Completed, "目标已消灭或不可见");
+                return;
+            }
             // 军团 12 半径内选最高价值目标：英雄优先，其次魔法矿造价高者
             var c = f.Centroid;
             Unit best = null; float bestScore = -1f;
@@ -215,6 +254,76 @@ namespace Eresoth
         {
             // 原地驻守：只下达一次"停在当前位置"，之后不再重复发令
             Issue(f, o, u => { if (!u.attackMove && u.target == null) u.CommandMove(u.transform.position); });
+        }
+
+        void DoScout(Force f, Order o)
+        {
+            // 侦察兵：优先 unit_filter 指定的兵种；军团里没有就从全阵营找；取移速最快的一个
+            if (o.scoutUnit != null && !o.scoutUnit.Alive)
+            { OrderDispatcher.I.Complete(o, OrderState.Failed, "侦察兵阵亡"); return; }
+            if (o.scoutUnit == null)
+            {
+                o.scoutUnit = PickScout(f, o);
+                if (o.scoutUnit == null)
+                { OrderDispatcher.I.Complete(o, OrderState.Failed, "没有可派遣的侦察单位"); return; }
+                o.scoutRoute = BuildScoutRoute(o.scoutUnit.transform.position);
+                o.scoutIdx = 0;
+                GameEventBus.Publish(GameEventType.ForceEngaged, f.team, o.scoutUnit.transform.position,
+                    EventSeverity.Info, o.id, $"{f.name} 侦察兵已出发");
+            }
+            var scout = o.scoutUnit;
+            // 途中发现敌情上报一次
+            var foe = NearestEnemy(f.team, scout.transform.position, MainForceRadius);
+            if (foe != null) LogEngaged(f, o);
+
+            var wp = o.scoutRoute[o.scoutIdx];
+            if ((!scout.attackMove || Vector3.Distance(scout.movePos, wp) > 3f) && scout.manualOverrideUntil < Time.time)
+                scout.CommandAttackMove(wp);
+            if (Vector3.Distance(scout.transform.position, wp) < 10f)
+            {
+                o.scoutIdx++;
+                if (o.scoutIdx >= o.scoutRoute.Count)
+                    OrderDispatcher.I.Complete(o, OrderState.Completed, "侦查一圈完成");
+            }
+        }
+
+        Unit PickScout(Force f, Order o)
+        {
+            Unit best = null;
+            System.Func<Unit, bool> match = u => !u.def.worker
+                && (!o.unitFilter.HasValue || u.def.kind == o.unitFilter.Value);
+            for (int i = 0; i < f.units.Count; i++)
+            {
+                var u = f.units[i];
+                if (u == null || !u.Alive || !match(u)) continue;
+                if (best == null || u.def.speed > best.def.speed) best = u;
+            }
+            if (best != null) return best;
+            // 军团内没有匹配者：从全阵营军团借一个（"派个骑兵去侦查"即使骑兵在别的军团）
+            if (ForceManager.I != null)
+                foreach (var of in ForceManager.I.OfTeam(f.team))
+                {
+                    if (of == f) continue;
+                    for (int i = 0; i < of.units.Count; i++)
+                    {
+                        var u = of.units[i];
+                        if (u == null || !u.Alive || !match(u)) continue;
+                        if (best == null || u.def.speed > best.def.speed) best = u;
+                    }
+                }
+            return best;
+        }
+
+        /// <summary>侦察路线：中场 → 敌方东矿 → 敌方主基地 → 敌方西矿 → 中央富集矿 → 回家。</summary>
+        List<Vector3> BuildScoutRoute(Vector3 from)
+        {
+            var route = new List<Vector3>();
+            foreach (var id in new[] { "center_field", "enemy_east_mana", "enemy_main_base",
+                "enemy_west_mana", "center_mana", "own_main_base" })
+                if (SemanticMap.TryGet(id, out var sp) && !route.Exists(p => Vector3.Distance(p, sp.pos) < 4f))
+                    route.Add(sp.pos);
+            if (route.Count == 0) route.Add(-from);   // 极端兜底：对角线跑一趟
+            return route;
         }
 
         // ---------------- 通用规则 ----------------

@@ -43,13 +43,18 @@ namespace Eresoth
             public string force_id;
             public string action;          // 军事 8 种 + 经济 train/research/build/assign_workers
             public string target_id;       // 军事：语义点；经济：unit_id/tech_id/building_kind
-            public string unit_filter;     // worker/infantry/ranged/cavalry，空 = 全军团
+            public string unit_filter;     // worker/infantry/ranged/cavalry（或中文：工人/步兵/弓兵/骑兵），空 = 全军团
             public int priority = 50;
             public string stance = "defensive";   // aggressive/defensive/cautious
             public float expires_after_seconds;
-            public int count;              // train 用
-            public float ratio;            // assign_workers 用
-            public string resource;        // assign_workers：wood/mana
+            public int count;              // train/build 用
+            public float ratio;            // assign_workers 用；reorganize 抽调比例（0=全部）
+            public string resource;        // assign_workers：wood/mana/both
+            public int worker_count;       // build/assign_workers：抽调工人数（0=只动空闲，-1=全体重排）
+            public string source_id;       // reorganize：来源军团（"__all__"=其余全部）
+            public string target_ref;      // 模糊目标："hero"/"kind:cavalry"/"bld:<别名>:enemy|own"
+            public string batch;           // 建造/训练队列：同批次按 sequence 依次执行
+            public int sequence;
             public List<ConditionDto> conditions = new();
         }
 
@@ -101,16 +106,17 @@ namespace Eresoth
                 Game.I.Toast($"军令 JSON 解析失败：{e.Message}");
                 return false;
             }
-            if (req == null || req.orders.Count == 0)
+            if (req == null || (req.orders.Count == 0 && (req.economy == null || req.economy.Count == 0)))
             { Game.I.Toast("军令为空"); return false; }
 
             int ok = 0;
             foreach (var dto in req.orders)
-            {
-                var o = Map(dto, req.player_text, out string err);
-                if (o == null) { Game.I.Toast($"军令无效：{err}"); continue; }
-                if (OrderDispatcher.I.SubmitOrder(o)) ok++;
-            }
+                foreach (var expanded in ExpandForces(dto))
+                {
+                    var o = Map(expanded, req.player_text, out string err);
+                    if (o == null) { Game.I.Toast($"军令无效：{err}"); continue; }
+                    if (OrderDispatcher.I.SubmitOrder(o)) ok++;
+                }
             if (req.economy != null)
                 foreach (var dto in req.economy)
                 {
@@ -119,6 +125,36 @@ namespace Eresoth
                     if (OrderDispatcher.I.SubmitOrder(o)) ok++;
                 }
             return ok > 0;
+        }
+
+        /// <summary>"全军"展开：给该阵营每个军团各复制一条军令；普通指代原样返回。</summary>
+        public static IEnumerable<OrderDto> ExpandForces(OrderDto dto)
+        {
+            if (!ReferenceResolver.IsAllForcesText(dto.force_id) && dto.force_id != ReferenceResolver.AllForcesId)
+            { yield return dto; yield break; }
+            if (ForceManager.I == null || Game.I == null) yield break;
+            var forces = ForceManager.I.OfTeam(Game.I.playerTeam);
+            if (forces.Count == 0) yield break;
+            foreach (var f in forces)
+                yield return new OrderDto
+                {
+                    force_id = f.id,
+                    action = dto.action,
+                    target_id = dto.target_id,
+                    unit_filter = dto.unit_filter,
+                    priority = dto.priority,
+                    stance = dto.stance,
+                    expires_after_seconds = dto.expires_after_seconds,
+                    count = dto.count,
+                    ratio = dto.ratio,
+                    resource = dto.resource,
+                    worker_count = dto.worker_count,
+                    source_id = dto.source_id,
+                    target_ref = dto.target_ref,
+                    batch = dto.batch,
+                    sequence = dto.sequence,
+                    conditions = dto.conditions,
+                };
         }
 
         /// <summary>DTO → Order 映射（Schema v2）；字段不合法时返回 null 并给出原因。</summary>
@@ -138,7 +174,28 @@ namespace Eresoth
                 count = dto.count,
                 ratio = dto.ratio,
                 resource = dto.resource,
+                workerCount = dto.worker_count,
+                sourceId = dto.source_id,
+                targetRef = dto.target_ref,
+                batchId = dto.batch,
+                sequence = dto.sequence,
             };
+            // 经济目标别名容错：模型/玩家可能写"弓箭手""兵营"而非 id，按阵营归一
+            if (Game.I != null)
+            {
+                if (action == OrderAction.Train && !string.IsNullOrEmpty(o.targetId)
+                    && !RuntimeConfig.Units.ContainsKey(o.targetId))
+                {
+                    string rid = ReferenceResolver.ResolveTrainableUnitId(Game.I.playerTeam, o.targetId);
+                    if (rid != null) o.targetId = rid;
+                }
+                else if (action == OrderAction.Build && !string.IsNullOrEmpty(o.targetId)
+                    && !RuntimeConfig.Buildings.ContainsKey(o.targetId))
+                {
+                    string rk = ReferenceResolver.ResolveBuildableKind(Game.I.playerTeam, o.targetId);
+                    if (rk != null) o.targetId = rk;
+                }
+            }
             if (!string.IsNullOrEmpty(dto.unit_filter))
             {
                 if (TryParseKind(dto.unit_filter, out var kind)) o.unitFilter = kind;
@@ -228,6 +285,8 @@ namespace Eresoth
                 case "research": a = OrderAction.Research; return true;
                 case "build": a = OrderAction.Build; return true;
                 case "assign_workers": a = OrderAction.AssignWorkers; return true;
+                case "scout": a = OrderAction.Scout; return true;
+                case "reorganize": a = OrderAction.Reorganize; return true;
                 default: return false;
             }
         }
@@ -244,10 +303,10 @@ namespace Eresoth
             k = default;
             switch (s)
             {
-                case "worker": k = UnitKind.Worker; return true;
-                case "infantry": k = UnitKind.Infantry; return true;
-                case "ranged": k = UnitKind.Ranged; return true;
-                case "cavalry": k = UnitKind.Cavalry; return true;
+                case "worker": case "工人": case "农民": case "侍僧": k = UnitKind.Worker; return true;
+                case "infantry": case "步兵": case "骷髅": k = UnitKind.Infantry; return true;
+                case "ranged": case "远程": case "弓兵": case "弓手": case "弓箭手": case "长弓手": k = UnitKind.Ranged; return true;
+                case "cavalry": case "骑兵": case "骑士": k = UnitKind.Cavalry; return true;
                 default: return false;
             }
         }

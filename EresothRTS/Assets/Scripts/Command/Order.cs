@@ -1,15 +1,18 @@
 using System.Collections.Generic;
+using UnityEngine;
 
 namespace Eresoth
 {
-    /// <summary>军令动作白名单 v2。军事 8 种走 ForceController；经济 4 种走 EconomyPlanner。
+    /// <summary>军令动作白名单 v2。军事走 ForceController；经济走 EconomyPlanner；编制调整即时执行。
     /// 扩展方式：在此注册枚举 + 在执行器挂钩，解析/校验/Prompt 词表全部自动跟随。</summary>
     public enum OrderAction
     {
         // 军事（作用于军团）
-        Move, Attack, AttackMove, Defend, Retreat, FocusFire, Regroup, Hold,
+        Move, Attack, AttackMove, Defend, Retreat, FocusFire, Regroup, Hold, Scout,
         // 经济（作用于阵营，持续计划）
-        Train, Research, Build, AssignWorkers
+        Train, Research, Build, AssignWorkers,
+        // 编制（作用于军团成员，提交即执行完毕）
+        Reorganize
     }
 
     public enum OrderState { Created, Validated, Queued, Executing, Completed, Failed, Cancelled, Expired, Overridden }
@@ -65,11 +68,27 @@ namespace Eresoth
         public float createdAt;
 
         // ---- 经济动作参数 ----
-        public int count;                 // Train：数量
-        public float ratio;               // AssignWorkers：目标资源占比（0~1）
-        public string resource;           // AssignWorkers："wood"/"mana"
+        public int count;                 // Train/Build：数量
+        public float ratio;               // AssignWorkers：目标资源占比（0~1）；Reorganize：抽调比例（0=全部）
+        public string resource;           // AssignWorkers："wood"/"mana"/"both"（both=按 ratio 采矿、其余采木）
+        public int workerCount;           // Build/AssignWorkers：抽调工人数（0=只动空闲，-1=全体重排）
 
-        public bool IsEconomy => action >= OrderAction.Train;
+        // ---- 编制调整参数 ----
+        public string sourceId;           // Reorganize：来源军团（"__all__" = 除目标军团外的全部）
+
+        // ---- 模糊目标指代（运行时解析）----
+        public string targetRef;          // "hero" / "kind:cavalry" / "bld:<别名>:enemy|own"
+
+        // ---- 建造/训练队列 ----
+        public string batchId;            // 同批次的计划按 sequence 依次执行（"依次造A和B"）
+        public int sequence;
+
+        // ---- 运行时状态（Scout 用，不入日志）----
+        public Unit scoutUnit;
+        public List<Vector3> scoutRoute;
+        public int scoutIdx;
+
+        public bool IsEconomy => action >= OrderAction.Train && action <= OrderAction.AssignWorkers;
 
         public bool IsTerminal => state == OrderState.Completed || state == OrderState.Failed
             || state == OrderState.Cancelled || state == OrderState.Expired || state == OrderState.Overridden;
@@ -80,8 +99,10 @@ namespace Eresoth
             { OrderAction.AttackMove, "推进" }, { OrderAction.Defend, "防守" },
             { OrderAction.Retreat, "撤退" }, { OrderAction.FocusFire, "集火" },
             { OrderAction.Regroup, "集结" }, { OrderAction.Hold, "驻守" },
+            { OrderAction.Scout, "侦察" },
             { OrderAction.Train, "训练" }, { OrderAction.Research, "研究" },
             { OrderAction.Build, "建造" }, { OrderAction.AssignWorkers, "分配工人" },
+            { OrderAction.Reorganize, "编制调整" },
         };
 
         /// <summary>一行可读描述：HUD/战报/态势摘要共用。</summary>
@@ -95,9 +116,15 @@ namespace Eresoth
                 case OrderAction.Research:
                     return $"研究 {TechName(targetId)}";
                 case OrderAction.Build:
-                    return $"建造 {BuildingName(targetId)}";
+                    return count > 1 ? $"建造 {BuildingName(targetId)}×{Mathf_Max1(count)}" : $"建造 {BuildingName(targetId)}";
                 case OrderAction.AssignWorkers:
+                    if (resource == "both")
+                        return $"全部工人按 {ratio * 100f:0}% 采魔法矿、其余采木";
                     return $"工人 {ratio * 100f:0}% 采{(resource == "mana" ? "魔法矿" : "木头")}";
+                case OrderAction.Scout:
+                    return "侦察一圈";
+                case OrderAction.Reorganize:
+                    return $"编制调整 → {forceId}";
                 default:
                     string tgt = "";
                     if (!string.IsNullOrEmpty(targetId) && SemanticMap.TryGet(targetId, out var sp))
