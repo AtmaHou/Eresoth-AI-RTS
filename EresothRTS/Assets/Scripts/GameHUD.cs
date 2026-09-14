@@ -14,6 +14,7 @@ namespace Eresoth
         bool showCommandPanel;   // F9：指挥调试面板（军团状态 + 事件战报）
         bool showLlmSettings;    // F10 / 面板按钮：LLM 配置（只在开局菜单，对局内不出现）
         string llmUrl = "", llmKey = "", llmModel = "", llmMsg = "";
+        bool llmThinking;       // 推理模式（thinking）：模型先输出推理过程，需更大 token 预算与更长超时
         bool llmTesting;        // 连通性测试进行中
         string llmTestMsg = ""; // 连通性测试结果（含延迟）
 
@@ -30,7 +31,7 @@ namespace Eresoth
         {
             showLlmSettings = !showLlmSettings;
             if (!showLlmSettings) return;
-            if (LlmClient.I != null) LlmClient.I.GetConfig(out llmUrl, out llmKey, out llmModel);
+            if (LlmClient.I != null) LlmClient.I.GetConfig(out llmUrl, out llmKey, out llmModel, out llmThinking);
             if (string.IsNullOrWhiteSpace(llmUrl)) llmUrl = "https://api.openai.com/v1";
             if (string.IsNullOrWhiteSpace(llmModel)) llmModel = "gpt-4o-mini";
             llmMsg = "";
@@ -39,7 +40,7 @@ namespace Eresoth
         void SaveLlmSettings()
         {
             if (LlmClient.I == null) return;
-            LlmClient.I.SaveLocal(llmUrl, llmKey, llmModel);
+            LlmClient.I.SaveLocal(llmUrl, llmKey, llmModel, llmThinking);
             llmMsg = LlmClient.I.Available ? "已保存到本机（不入库）" : "已保存但不可用（缺 key？）";
         }
 
@@ -51,17 +52,37 @@ namespace Eresoth
             llmMsg = LlmClient.I.Available ? "已清除（改用根目录配置）" : "已清除，LLM 不可用（走兜底）";
         }
 
-        /// <summary>连通性测试：用输入框里的参数实测一次（不保存、不影响当前配置），回报延迟。</summary>
+        /// <summary>连通性测试：用输入框里的参数实测一次（不保存、不影响当前配置），回报延迟。
+        /// 结果同时写入 command_log.jsonl（与对局指挥日志同文件，方便集中查看）。</summary>
         void TestLlmConnection()
         {
             if (LlmClient.I == null || llmTesting) return;
             llmTesting = true;
             llmTestMsg = "测试中…";
-            LlmClient.I.TestConnection(llmUrl, llmKey, llmModel, (ok, msg) =>
+            string testedModel = llmModel;
+            LlmClient.I.TestConnection(llmUrl, llmKey, llmModel, llmThinking, (ok, msg) =>
             {
                 llmTesting = false;
                 llmTestMsg = msg;
+                AppendCommandLog("llm_test", $"model={testedModel} {(ok ? "ok" : "fail")}: {msg}");
             });
+        }
+
+        /// <summary>向 command_log.jsonl 追加一行（静态路径，开始菜单与指挥台共用同一文件）。</summary>
+        static void AppendCommandLog(string kind, string detail)
+        {
+            try
+            {
+                string p = System.IO.Path.Combine(Application.dataPath, "../command_log.jsonl");
+                string J(string s) => "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n") + "\"";
+                System.IO.File.AppendAllText(p, "{\"wall\":" + J(System.DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"))
+                    + ",\"t\":" + Time.time.ToString("0")
+                    + ",\"text\":" + J($"[{kind}]")
+                    + ",\"digest\":null,\"request\":null,\"response\":null,\"model\":null"
+                    + ",\"result\":" + J(detail)
+                    + ",\"exec\":null}\n");
+            }
+            catch { /* 日志失败不影响游戏 */ }
         }
 
         void EnsureStyles()
@@ -211,6 +232,12 @@ namespace Eresoth
             GUI.Label(new Rect(fx, ty, lblW, rowH), "模型", mid);
             GUI.SetNextControlName("llmModel");
             llmModel = GUI.TextField(new Rect(fx + lblW, ty, fw, rowH), llmModel, 80);
+            ty += rowH;
+            GUI.Label(new Rect(fx, ty, lblW, rowH), "模式", mid);
+            if (GUI.Button(new Rect(fx + lblW, ty, 150, rowH), llmThinking ? "推理（thinking）：开" : "推理（thinking）：关"))
+                llmThinking = !llmThinking;
+            GUI.Label(new Rect(fx + lblW + 158, ty + 2, fw - 158, 22),
+                llmThinking ? "先输出推理再出正文，token 预算与超时放大" : "普通调用；模型名字带 thinking/reason 时仍自动按推理对待", small);
             ty += rowH + 4;
 
             if (GUI.Button(new Rect(fx, ty, 100, 24), "保存到本机")) SaveLlmSettings();
@@ -221,14 +248,17 @@ namespace Eresoth
             GUI.enabled = true;
             GUI.Label(new Rect(fx + 324, ty + 2, r.width - 374, 22), llmMsg, mid);
             ty += 28;
-            // 连通性测试结果（显式红绿灯 + 延迟）
+            // 连通性测试结果（红绿灯 + 延迟；两行折行显示，悬停看全文，完整现场在 llm_log.jsonl）
             if (!string.IsNullOrEmpty(llmTestMsg))
             {
                 bool ok = llmTestMsg.StartsWith("连通正常");
                 GUI.color = ok ? new Color(.6f, 1f, .7f) : new Color(1f, .6f, .55f);
-                GUI.Label(new Rect(fx, ty, r.width - 100, 20), "● " + llmTestMsg, mid);
+                const int shownMax = 110;
+                string shown = llmTestMsg.Length > shownMax ? llmTestMsg.Substring(0, shownMax) + "…" : llmTestMsg;
+                GUI.Label(new Rect(fx, ty, r.width - 100, 36),
+                    new GUIContent("● " + shown, llmTestMsg), mid);
                 GUI.color = Color.white;
-                ty += 22;
+                ty += 38;
             }
             GUI.Label(new Rect(fx, ty, r.width - 100, 34),
                 "配置保存位置（本机文件，绝不进入 git 仓库）：\n" + SplitPath(LlmClient.LocalConfigPath), small);
@@ -275,14 +305,16 @@ namespace Eresoth
                     {
                         var bd = list[i];
                         int n = g.buildings.FindAll(x => x.team == b.team && x.kind == bd.kind).Count;
-                        bool multi = bd.kind == "tower" || bd.kind == "house";   // 箭塔/民居可建多座
-                        bool built = !multi && n > 0;
+                        // 多座类：箭塔/民居/收集站/兵种建筑（兵营等可建多座爆兵，上限 ProductionBuildingCap）
+                        int cap = bd.kind == "tower" ? Game.TowerCap
+                            : bd.train != null ? Game.ProductionBuildingCap : 0;
+                        bool unique = cap == 0 && bd.kind != "house" && bd.kind != "resource_hub";
                         string cost = bd.mana > 0 ? $"{bd.wood}木+{bd.mana}矿" : $"{bd.wood}木";
                         bool afford = g.wood[bi] >= bd.wood && g.mana[bi] >= bd.mana;
-                        string label = bd.kind == "tower" ? $"建造{bd.name}({n}/{Game.TowerCap})"
-                            : multi ? $"建造{bd.name}({n})"
-                            : built ? $"{bd.name}已建成" : $"建造{bd.name}({cost})";
-                        bool canDo = bd.kind == "tower" ? n < Game.TowerCap && afford : multi ? afford : !built && afford;
+                        string label = cap > 0 ? $"建造{bd.name}({n}/{cap})"
+                            : unique && n > 0 ? $"{bd.name}已建成" : $"建造{bd.name}({cost})";
+                        bool canDo = cap > 0 ? n < cap && afford
+                            : unique && n > 0 ? false : afford;
                         var def = bd;
                         Btn(new Rect(190 + i * 145, y + 30, 140, 30), label,
                             () => sel.BeginPlacement(def), canDo);

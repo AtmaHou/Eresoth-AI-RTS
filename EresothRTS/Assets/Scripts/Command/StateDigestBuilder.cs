@@ -86,7 +86,7 @@ namespace Eresoth
             // 动态词表
             sb.Append(",\"vocab\":{");
             sb.Append("\"actions\":[\"move\",\"attack\",\"attack_move\",\"defend\",\"retreat\",\"focus_fire\",\"regroup\",\"hold\",\"scout\",\"reorganize\"],");
-            sb.Append("\"economy_actions\":[\"train\",\"research\",\"build\",\"assign_workers\"],");
+            sb.Append("\"economy_actions\":[\"train\",\"research\",\"build\",\"assign_workers\",\"repair\"],");
             sb.Append("\"metrics\":[\"enemy_count_near\",\"ally_health_ratio\",\"resource\",\"building_hp_ratio\",\"enemy_visible\",\"time_elapsed\"],");
             sb.Append("\"targets\":[");
             for (int i = 0; i < SemanticMap.All.Count; i++)

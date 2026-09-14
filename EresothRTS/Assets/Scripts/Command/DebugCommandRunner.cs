@@ -195,6 +195,12 @@ namespace Eresoth
                     string rk = ReferenceResolver.ResolveBuildableKind(Game.I.playerTeam, o.targetId);
                     if (rk != null) o.targetId = rk;
                 }
+                else if (action == OrderAction.Repair && !string.IsNullOrEmpty(o.targetId)
+                    && !RuntimeConfig.Buildings.ContainsKey(o.targetId))
+                {
+                    string rk = ReferenceResolver.ResolveBuildableKind(Game.I.playerTeam, o.targetId);
+                    if (rk != null) o.targetId = rk;
+                }
             }
             if (!string.IsNullOrEmpty(dto.unit_filter))
             {
@@ -285,6 +291,7 @@ namespace Eresoth
                 case "research": a = OrderAction.Research; return true;
                 case "build": a = OrderAction.Build; return true;
                 case "assign_workers": a = OrderAction.AssignWorkers; return true;
+                case "repair": a = OrderAction.Repair; return true;
                 case "scout": a = OrderAction.Scout; return true;
                 case "reorganize": a = OrderAction.Reorganize; return true;
                 default: return false;

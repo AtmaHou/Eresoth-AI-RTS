@@ -38,10 +38,28 @@ namespace Eresoth
             // --- 军事军令：模糊解析军团（"军团一/1队/army_1"均可） ---
             if (ForceManager.I == null) return Reject(o, "军团系统未就绪");
             var force = ForceManager.I.Resolve(o.forceId);
+            if (force == null && o.action == OrderAction.Scout)
+            {
+                // 侦察不绑定既有编队：标准开局没按 F10 也能侦查——先自动编队，侦察兵还会跨军团抽调
+                ForceManager.I.AutoForm(Game.I.playerTeam);
+                force = ForceManager.I.Resolve(o.forceId);
+            }
             if (force == null)
                 return Reject(o, $"军团不存在：{o.forceId}（可用：{ListForces()}；先按 F10 或说\"全军集结\"编组）");
+            if (force.AliveCount == 0)
+            {
+                if (o.action == OrderAction.Scout)
+                {
+                    // 新训练的兵可能还没编组：补一次自动编队，再退而求其次挂到任一非空军团
+                    ForceManager.I.AutoForm(Game.I.playerTeam);
+                    if (force.AliveCount == 0)
+                        force = ForceManager.I.OfTeam(Game.I.playerTeam).Find(x => x.AliveCount > 0) ?? force;
+                    if (force.AliveCount == 0)
+                        return Reject(o, "没有可派遣的作战单位（先训练士兵）");
+                }
+                else return Reject(o, $"{force.name} 已经没有可指挥的单位");
+            }
             o.forceId = force.id;
-            if (force.AliveCount == 0) return Reject(o, $"{force.name} 已经没有可指挥的单位");
             if (!string.IsNullOrEmpty(o.targetId) && !SemanticMap.Exists(o.targetId))
                 return Reject(o, $"目标无法识别：{o.targetId}");
 
@@ -222,6 +240,15 @@ namespace Eresoth
                     if (o.resource != "wood" && o.resource != "mana" && o.resource != "both")
                         return $"未知资源类型：{o.resource}";
                     if (o.ratio < 0f || o.ratio > 1f) return $"占比非法：{o.ratio}";
+                    return null;
+                case OrderAction.Repair:
+                    if (string.IsNullOrEmpty(o.targetId) || o.targetId == "all") return null;
+                    if (!RuntimeConfig.Buildings.ContainsKey(o.targetId))
+                    {
+                        string aliasKind = ReferenceResolver.ResolveBuildableKind(Game.I.playerTeam, o.targetId);
+                        if (aliasKind == null) return $"未知建筑：{o.targetId}";
+                        o.targetId = aliasKind;
+                    }
                     return null;
                 default:
                     return null;

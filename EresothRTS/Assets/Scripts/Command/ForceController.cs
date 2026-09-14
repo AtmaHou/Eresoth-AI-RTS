@@ -272,18 +272,21 @@ namespace Eresoth
                     EventSeverity.Info, o.id, $"{f.name} 侦察兵已出发");
             }
             var scout = o.scoutUnit;
-            // 途中发现敌情上报一次
+            // 途中发现敌情上报一次（侦察只观察不恋战）
             var foe = NearestEnemy(f.team, scout.transform.position, MainForceRadius);
             if (foe != null) LogEngaged(f, o);
 
             var wp = o.scoutRoute[o.scoutIdx];
-            if ((!scout.attackMove || Vector3.Distance(scout.movePos, wp) > 3f) && scout.manualOverrideUntil < Time.time)
-                scout.CommandAttackMove(wp);
+            if ((scout.evadeMode == false || Vector3.Distance(scout.movePos, wp) > 3f) && scout.manualOverrideUntil < Time.time)
+                scout.CommandEvadeMove(wp);   // 脱战赶路：不打沿途的敌人
             if (Vector3.Distance(scout.transform.position, wp) < 10f)
             {
                 o.scoutIdx++;
                 if (o.scoutIdx >= o.scoutRoute.Count)
+                {
+                    scout.CommandMove(wp);   // 解除侦察模式，停在终点恢复正常行为
                     OrderDispatcher.I.Complete(o, OrderState.Completed, "侦查一圈完成");
+                }
             }
         }
 

@@ -2,13 +2,14 @@ using UnityEngine;
 
 namespace Eresoth
 {
-    /// <summary>采集状态机：前往资源点 → 采集 → 回主基地交付 → 循环。</summary>
+    /// <summary>采集状态机：前往资源点 → 采集 → 回主基地交付 → 循环；另有建造/修理状态。</summary>
     public class Worker : MonoBehaviour
     {
-        public enum State { Idle, ToNode, Gathering, Returning, Constructing, Building }
+        public enum State { Idle, ToNode, Gathering, Returning, Constructing, Building, Repairing }
         public State state = State.Idle;
         public ResourceNode node;
         public Building construction;        bool constructionOptOut;
+        public Building repairTarget;
         public int carry;
         string curKind = "wood";
         float t;
@@ -20,9 +21,17 @@ namespace Eresoth
         public void GatherAt(ResourceNode n) { StopGather(); constructionOptOut = true; node = n; state = State.ToNode; }
         public void BuildAt(Building b)
         {
+            repairTarget = null;
             node = null;
             if (construction != null && construction != b) construction.RemoveBuilder(u);
             construction = b; constructionOptOut = false; state = State.Constructing;
+        }
+        /// <summary>修理受损建筑：到工地后持续修复（耗木），修满或目标消失自动回空闲。</summary>
+        public void RepairAt(Building b)
+        {
+            if (b == null) return;
+            StopGather();
+            repairTarget = b; state = State.Repairing;
         }
         public void FinishBuilding(Building b)
         {
@@ -32,7 +41,7 @@ namespace Eresoth
         {
             if (construction != null) construction.RemoveBuilder(u);
             if (construction != null) constructionOptOut = true;
-            node = null; construction = null; state = State.Idle;
+            node = null; construction = null; repairTarget = null; state = State.Idle;
         }
 
         void Update()
@@ -93,6 +102,24 @@ namespace Eresoth
                     float keepDist = construction.radius + u.Radius + 1.4f;
                     if (Vector3.Distance(transform.position, construction.transform.position) > keepDist + 0.3f)
                         state = State.Constructing;
+                    break;
+
+                case State.Repairing:
+                    if (repairTarget == null || !repairTarget.Alive)
+                    { repairTarget = null; state = State.Idle; break; }
+                    if (repairTarget.constructing)
+                    {   // 还没完工：转为参与建造
+                        var b = repairTarget; repairTarget = null; BuildAt(b); break;
+                    }
+                    if (!repairTarget.NeedsRepair)
+                    {
+                        GameEventBus.Publish(GameEventType.OrderCompleted, u.team, transform.position,
+                            EventSeverity.Info, null, $"{repairTarget.DisplayName} 修理完成");
+                        repairTarget = null; state = State.Idle; break;
+                    }
+                    float repairStop = repairTarget.radius + u.Radius + 1.2f;
+                    if (u.MoveStep(repairTarget.transform.position, dt, repairStop))
+                        repairTarget.Repair(GameConfig.RepairRate * dt, u.team);   // 缺木时 Repair 返回 false，原地等待
                     break;
             }
 

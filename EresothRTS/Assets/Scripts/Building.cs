@@ -14,6 +14,7 @@ namespace Eresoth
         public Vector3 rally;        // 集结点
         public bool constructing;
         public float constructionProgress;
+        float bonusDamage;           // 施工期间承受的额外伤害（进度血量曲线之外的部分，防止 Update 每帧回血导致"无敌"）
         readonly List<Unit> builders = new();
         public readonly List<UnitDef> queue = new();
         public string research;      // 当前研究中的科技 id，null = 空闲
@@ -86,7 +87,9 @@ namespace Eresoth
                 builders.RemoveAll(u => u == null || !u.Alive || u.GetComponent<Worker>() == null);
                 if (builders.Count > 0)
                     constructionProgress = Mathf.Clamp01(constructionProgress + dt * (1f + .75f * builders.Count) / GameConfig.ConstructionTime);
-                hp = Mathf.Max(1f, def.hp * Mathf.Lerp(.05f, 1f, constructionProgress));
+                // 施工血量 = 进度曲线血量 - 施工期间承受的额外伤害；伤害不再被每帧重置（原实现等于施工中无敌）
+                hp = def.hp * Mathf.Lerp(.05f, 1f, constructionProgress) - bonusDamage;
+                if (hp <= 0f) { Damage(0f); return; }
                 if (constructionProgress >= 1f) CompleteConstruction();
                 return;
             }
@@ -196,7 +199,10 @@ namespace Eresoth
 
         public void Damage(float dmg)
         {
-            hp -= dmg * (constructing ? GameConfig.ConstructionDamageMultiplier : 1f);
+            float mult = constructing ? GameConfig.ConstructionDamageMultiplier : 1f;
+            hp -= dmg * mult;
+            // 施工期间：额外伤害累积起来，由 Update 从进度血量中扣除（否则下一帧就被回血覆盖）
+            if (constructing) bonusDamage += dmg * mult;
             // 事件挂钩：主基地遇袭（5 秒去重防刷屏），供紧急回防/战报使用
             if (kind == "hall" && Game.I != null && Game.I.started && Time.time - lastAttackEventT > 5f)
             {
@@ -212,6 +218,21 @@ namespace Eresoth
                     kind, $"{DisplayName} 被摧毁");
                 Destroy(gameObject);
             }
+        }
+
+        /// <summary>是否受损需要修理（完工建筑，施工中由建造流程管血量）。</summary>
+        public bool NeedsRepair => Alive && !constructing && hp < def.hp - 0.5f;
+
+        /// <summary>工人修理：消耗木材恢复 HP。资源不足返回 false（工人原地等待）。</summary>
+        public bool Repair(float amount, Team repairTeam)
+        {
+            if (!Alive || constructing) return false;
+            if (hp >= def.hp) { hp = def.hp; return true; }
+            int woodCost = Mathf.CeilToInt(amount * GameConfig.RepairWoodPerHp);
+            if (woodCost > 0 && Game.I.wood[(int)repairTeam] < woodCost) return false;
+            if (woodCost > 0) Game.I.wood[(int)repairTeam] -= woodCost;
+            hp = Mathf.Min(def.hp, hp + amount);
+            return true;
         }
 
         public bool AddBuilder(Unit worker)
@@ -244,7 +265,8 @@ namespace Eresoth
         void CompleteConstruction()
         {
             constructing = false;
-            hp = def.hp;
+            hp = Mathf.Max(1f, def.hp - bonusDamage);   // 施工期间受的伤害保留到完工后
+            bonusDamage = 0f;
             if (modelRenderers != null)
                 foreach (var r in modelRenderers) if (r != null) r.enabled = true;
             if (constructionSite != null) Destroy(constructionSite.gameObject);

@@ -188,6 +188,18 @@ namespace Eresoth
             bool sentWorkersToBuild = false;
             Team team = Game.I.playerTeam;
 
+            // 修理："农民修建筑/修一下主基地/修理箭塔"（不含"建/造"避免与"修建"混淆）
+            if (text.Contains("修") && !text.Contains("建") && !text.Contains("造"))
+            {
+                string kind = ReferenceResolver.ResolveBuildableKind(team, text);
+                // "修建筑"泛指：不指定 kind 则修受损最重的一座
+                if (kind == null && (text.Contains("建筑") || text.Contains("基地") || text.Contains("塔")))
+                    kind = text.Contains("基地") ? "hall" : text.Contains("塔") ? "tower" : null;
+                req.economy.Add(new DebugCommandRunner.OrderDto
+                { action = "repair", target_id = kind, worker_count = ExtractCount(text, 2) });
+                any = true;
+            }
+
             // 拉 N 个工人开分矿："拉两个农民工去开个分矿"
             if ((text.Contains("分矿") || text.Contains("开矿") || text.Contains("扩张"))
                 && (text.Contains("拉") || text.Contains("派") || text.Contains("叫") || text.Contains("让") || text.Contains("抽")))

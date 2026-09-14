@@ -77,6 +77,7 @@ namespace Eresoth
         void HandleLlmJson(string text, string digest, string json)
         {
             waiting = false;
+            json = LlmClient.StripCodeFence(json);   // Kimi 等无 response_format 的模型可能包 ```json 围栏
             DebugCommandRunner.CommandRequest req = null;
             try { req = JsonUtility.FromJson<DebugCommandRunner.CommandRequest>(json); } catch { }
 
@@ -92,11 +93,11 @@ namespace Eresoth
             }
 
             req.player_text = text;
-            int executed = Execute(req);
+            int executed = Execute(req, out string execSummary);
             string reply = !string.IsNullOrEmpty(req.player_reply) ? req.player_reply
                 : executed > 0 ? "收到，已下达。" : "没有可执行的指令。";
             Add("参谋", reply, json);
-            Log(text, digest, json, executed > 0 ? "executed" : "no-op");
+            Log(text, digest, json, executed > 0 ? "executed" : "no-op", execSummary);
             PushTurn(text, reply);
         }
 
@@ -110,33 +111,36 @@ namespace Eresoth
                 Log(text, digest, null, "fallback_failed: " + reason);
                 return;
             }
-            int executed = Execute(req);
+            int executed = Execute(req, out string fbSummary);
             Add("参谋", (req.player_reply ?? "收到。") + "［离线兜底］", raw);
-            Log(text, digest, null, $"fallback_executed({executed}): {reason}");
+            Log(text, digest, null, $"fallback_executed({executed}): {reason}", fbSummary);
             PushTurn(text, req.player_reply ?? "");
         }
 
-        /// <summary>执行解析结果：军事军令 + 经济计划逐条提交，返回成功条数。"全军"在此展开为每军团一条。</summary>
-        int Execute(DebugCommandRunner.CommandRequest req)
+        /// <summary>执行解析结果：军事军令 + 经济计划逐条提交，返回成功条数。"全军"在此展开为每军团一条。
+        /// execSummary 记录每条军令的执行/拒绝详情，落盘 command_log.jsonl 便于复盘"AI 到底收到了什么"。</summary>
+        int Execute(DebugCommandRunner.CommandRequest req, out string execSummary)
         {
             int ok = 0;
-            if (OrderDispatcher.I == null) return 0;
+            var sb = new System.Text.StringBuilder();
+            if (OrderDispatcher.I == null) { execSummary = "[dispatcher unavailable]"; return 0; }
             foreach (var dto in req.orders)
                 foreach (var expanded in DebugCommandRunner.ExpandForces(dto))
                 {
                     var o = DebugCommandRunner.Map(expanded, req.player_text, out string err);
-                    if (o == null) { Add("系统", $"军令无效：{err}"); continue; }
-                    if (OrderDispatcher.I.SubmitOrder(o)) ok++;
-                    else Add("系统", $"军令被拒：{o.failReason}");
+                    if (o == null) { Add("系统", $"军令无效：{err}"); sb.Append($"[invalid:{err}]"); continue; }
+                    if (OrderDispatcher.I.SubmitOrder(o)) { ok++; sb.Append($"[{o.forceId}:{o.action}]"); }
+                    else { Add("系统", $"军令被拒：{o.failReason}"); sb.Append($"[rejected:{o.failReason}]"); }
                 }
             if (req.economy != null)
                 foreach (var dto in req.economy)
                 {
                     var o = DebugCommandRunner.Map(dto, req.player_text, out string err);
-                    if (o == null) { Add("系统", $"经济计划无效：{err}"); continue; }
-                    if (OrderDispatcher.I.SubmitOrder(o)) ok++;
-                    else Add("系统", $"计划被拒：{o.failReason}");
+                    if (o == null) { Add("系统", $"经济计划无效：{err}"); sb.Append($"[eco invalid:{err}]"); continue; }
+                    if (OrderDispatcher.I.SubmitOrder(o)) { ok++; sb.Append($"[eco:{o.action}:{o.targetId}]"); }
+                    else { Add("系统", $"计划被拒：{o.failReason}"); sb.Append($"[eco rejected:{o.failReason}]"); }
                 }
+            execSummary = sb.ToString();
             return ok;
         }
 
@@ -153,18 +157,28 @@ namespace Eresoth
             scroll.y = float.MaxValue;   // 滚到底
         }
 
-        void Log(string text, string digest, string modelJson, string result)
+        void Log(string text, string digest, string modelJson, string result, string exec = null)
         {
             try
             {
-                string line = "{\"t\":" + Time.time.ToString("0")
+                // 完整现场：墙上时间 + 发给 LLM 的请求体（含 prompt）+ API 原始响应；均为最近一次调用
+                string reqBody = LlmClient.I != null ? LlmClient.I.LastRequestBody : null;
+                string respBody = LlmClient.I != null ? LlmClient.I.LastResponseBody : null;
+                string line = "{\"wall\":" + J(System.DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"))
+                    + ",\"t\":" + Time.time.ToString("0")
                     + ",\"text\":" + J(text) + ",\"digest\":" + (digest ?? "null")
-                    + ",\"model\":" + (modelJson != null ? J(modelJson) : "null")
-                    + ",\"result\":" + J(result) + "}";
+                    + ",\"request\":" + (reqBody != null ? J(Truncate(reqBody, 4000)) : "null")
+                    + ",\"response\":" + (respBody != null ? J(Truncate(respBody, 4000)) : "null")
+                    + ",\"model\":" + (modelJson != null ? J(Truncate(modelJson, 4000)) : "null")
+                    + ",\"result\":" + J(result)
+                    + ",\"exec\":" + (exec != null ? J(exec) : "null") + "}";
                 File.AppendAllText(logPath, line + "\n");
             }
             catch { /* 日志失败不影响游戏 */ }
         }
+
+        static string Truncate(string s, int max)
+            => string.IsNullOrEmpty(s) ? s : (s.Length <= max ? s : s.Substring(0, max) + "…");
 
         static string J(string s)
             => "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n") + "\"";
@@ -219,6 +233,7 @@ namespace Eresoth
                 "拉两个农夫去开个分矿",
                 "所有农民按比分配采资源",
                 "依次造2个兵营和3个箭塔",
+                "农民修理受损建筑",
             };
         }
 

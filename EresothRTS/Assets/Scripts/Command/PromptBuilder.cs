@@ -44,6 +44,7 @@ namespace Eresoth
             sb.Append("  {\"action\":\"research\",\"target_id\":科技id}\n");
             sb.Append("  {\"action\":\"build\",\"target_id\":建筑kind,\"count\":数量(可建多座时),\"worker_count\":抽调工人数}\n");
             sb.Append("  {\"action\":\"assign_workers\",\"resource\":\"wood|mana|both\",\"ratio\":0~1占比,\"worker_count\":工人数(-1=全体重排)}\n");
+            sb.Append("  {\"action\":\"repair\",\"target_id\":建筑kind(可选，缺省=受损最重的一座),\"worker_count\":工人数(缺省2)}\n");
             sb.Append("  说明：resource=\"both\" 时按 ratio 采魔法矿、其余采木；worker_count 缺省=只安排空闲工人。\n");
             sb.Append("  \"依次造A和B\"：每条设相同 batch(自定字符串) 与递增 sequence，系统按序执行。\n\n");
 

@@ -15,6 +15,8 @@ namespace Eresoth
         public bool attackMove;             // 攻击移动中：有移动命令但仍允许自动索敌
         public Unit lastAttacker;           // 最近攻击者（AI 军令层用）
         public bool busy;                   // 采集中（由 WorkerAI 维护）
+        /// <summary>侦察模式：只赶路不恋战——不自动索敌、被攻击不还手（任何新命令自动解除）。</summary>
+        public bool evadeMode;
         public int holdSlot = -1;           // 驻守法阵索引（-1 = 非驻守）
         public Transform ring;              // 选中高光圈
         public string forceId;              // 所属军团 ID（空 = 未编组；由 ForceManager 维护）
@@ -100,6 +102,7 @@ namespace Eresoth
             movePos = p;
             hasMoveOrder = true;
             attackMove = false;
+            evadeMode = false;
             var w = GetComponent<Worker>(); if (w != null) w.StopGather();
             busy = false;
         }
@@ -111,6 +114,7 @@ namespace Eresoth
             movePos = t.Pos;
             hasMoveOrder = false;
             attackMove = false;
+            evadeMode = false;
             var w = GetComponent<Worker>(); if (w != null) w.StopGather();
             busy = false;
         }
@@ -122,6 +126,19 @@ namespace Eresoth
             movePos = p;
             hasMoveOrder = true;
             attackMove = true;
+            evadeMode = false;
+            var w = GetComponent<Worker>(); if (w != null) w.StopGather();
+            busy = false;
+        }
+
+        /// <summary>侦察移动（军令层 scout 用）：只赶路——不自动索敌、被打也不还手。</summary>
+        public void CommandEvadeMove(Vector3 p)
+        {
+            target = null;
+            movePos = p;
+            hasMoveOrder = true;
+            attackMove = false;
+            evadeMode = true;
             var w = GetComponent<Worker>(); if (w != null) w.StopGather();
             busy = false;
         }
@@ -136,8 +153,8 @@ namespace Eresoth
             ResolveOverlap();                    // 碰撞体积：单位/建筑间推挤，防穿模
             if (busy) return;   // 采集循环由 WorkerAI 驱动（移动与动画都在 Worker 里）
 
-            // --- 目标决策：缓存目标失效则重寻最近敌（警戒范围）；攻击移动中也允许索敌 ---
-            if ((!hasMoveOrder || attackMove) && (target == null || !target.Alive))
+            // --- 目标决策：缓存目标失效则重寻最近敌（警戒范围）；攻击移动中也允许索敌；侦察模式只赶路 ---
+            if (!evadeMode && (!hasMoveOrder || attackMove) && (target == null || !target.Alive))
             {
                 target = null;
                 float best = def.aggro;
@@ -305,6 +322,7 @@ namespace Eresoth
             if (attacker != null && attacker.team != team) lastAttacker = attacker;
             if (Game.I.over || stunT > 0 || !Alive || attacker == null) return;
             if (attacker.team == team || !attacker.Alive || def.worker) return;
+            if (evadeMode) return;   // 侦察中：头也不回地跑
             if (target == null || !target.Alive) return;    // 无任务：由警戒索敌处理
             float dNew = Vector3.Distance(transform.position, attacker.transform.position);
             float dCur = Vector3.Distance(transform.position, target.Pos) - target.Radius;

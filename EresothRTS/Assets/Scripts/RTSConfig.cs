@@ -23,6 +23,10 @@ namespace Eresoth
         public float constructionTime = 8f;
         public int maxBuildersPerBuilding = 3;
         public float constructionDamageMultiplier = 2f;
+        [Tooltip("单个工人修理速度（HP/秒）")]
+        public float repairRate = 18f;
+        [Tooltip("修理每点 HP 消耗的木材")]
+        public float repairWoodPerHp = 0.04f;
         public float counterBonus = 1.5f;
         public float splashFrac = 0.5f;
         public int heroCap = 1;

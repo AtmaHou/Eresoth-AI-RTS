@@ -637,7 +637,12 @@ namespace Eresoth
         // ---------------- 建造（AI 用固定槽位；玩家自由选址） ----------------
 
         public const float BuildRadius = 32f;   // 玩家建筑需距己方主基地此范围内
-        public const int TowerCap = 8;          // 箭塔建造上限；民居可建多座；其余建筑全场唯一
+        public const int TowerCap = 8;          // 箭塔建造上限；民居可建多座
+        public const int ProductionBuildingCap = 5;   // 兵种建筑（兵营/弓箭场/马厩等）可建多座：快速爆兵
+
+        /// <summary>该建筑是否可建多座（箭塔/民居/收集站/兵种建筑——爆兵需要多兵营）。</summary>
+        public static bool IsMultiBuildable(BuildingDef def)
+            => def.kind == "tower" || def.kind == "house" || def.kind == "resource_hub" || def.train != null;
 
         static readonly Vector3[] BuildSlots =
         {
@@ -645,16 +650,21 @@ namespace Eresoth
             new Vector3(0, 0, 11), new Vector3(0, 0, -11), new Vector3(13, 0, 0), new Vector3(-13, 0, 0),
         };
 
-        /// <summary>AI 建建筑：固定槽位；民居/箭塔可建多座，其余同 kind 全场一座。</summary>
+        /// <summary>AI 建建筑：固定槽位；多座类建筑受各自上限约束，其余同 kind 全场一座。</summary>
         public bool BuildStructure(Team team, BuildingDef def)
             => TrySpawnStructure(team, def) != null;
 
         /// <summary>建建筑并返回实例（失败返回 null）：供指挥层继续抽调工人/判定完成。</summary>
         public Building TrySpawnStructure(Team team, BuildingDef def)
         {
-            bool multi = def.kind == "tower" || def.kind == "house" || def.kind == "resource_hub";
-            if (!multi && BuildingOfKind(team, def.kind) != null)
+            if (!IsMultiBuildable(def) && BuildingOfKind(team, def.kind) != null)
             { if (team == playerTeam) Toast($"{def.name}已建成"); return null; }
+            if (def.train != null)
+            {
+                int n = buildings.FindAll(b => b.team == team && b.kind == def.kind).Count;
+                if (n >= ProductionBuildingCap)
+                { if (team == playerTeam) Toast($"{def.name}最多 {ProductionBuildingCap} 座"); return null; }
+            }
 
             Vector3 c = baseCenter[(int)team];
             foreach (var off in BuildSlots)
@@ -739,6 +749,38 @@ namespace Eresoth
             return assigned;
         }
 
+        /// <summary>找最需要修理的建筑：受损比例最低者优先；kind 为 null/"all" 时不限种类。</summary>
+        public Building FindRepairTarget(Team team, string kind = null)
+        {
+            Building best = null; float bh = 2f;
+            foreach (var b in buildings)
+            {
+                if (b == null || b.team != team || !b.NeedsRepair) continue;
+                if (!string.IsNullOrEmpty(kind) && kind != "all" && b.kind != kind) continue;
+                if (b.Hp01 < bh) { bh = b.Hp01; best = b; }
+            }
+            return best;
+        }
+
+        /// <summary>派空闲工人去修理（只动空闲的，不打扰在采的——修理不急在这一秒）。返回派出人数。</summary>
+        public int PullWorkersToRepair(Team team, Building building, int count)
+        {
+            if (building == null || count <= 0) return 0;
+            var candidates = units.FindAll(u => u.team == team && u.def.worker && u.Alive);
+            candidates.Sort((a, b) => Vector3.Distance(a.transform.position, building.transform.position)
+                .CompareTo(Vector3.Distance(b.transform.position, building.transform.position)));
+            int sent = 0;
+            foreach (var u in candidates)
+            {
+                if (sent >= count) break;
+                var w = u.GetComponent<Worker>();
+                if (w == null || w.state != Worker.State.Idle) continue;
+                w.RepairAt(building);
+                sent++;
+            }
+            return sent;
+        }
+
         /// <summary>校验玩家自由选址：地图边界、主基地半径、与其他建筑/资源点不重叠。err 为失败原因。</summary>
         public bool CanPlaceAt(Team team, BuildingDef def, Vector3 p, out string err)
         {
@@ -758,13 +800,19 @@ namespace Eresoth
             return true;
         }
 
-        /// <summary>玩家在指定位置建建筑：民居/箭塔可建多座（箭塔有上限），其余同 kind 全场唯一。</summary>
+        /// <summary>玩家在指定位置建建筑：箭塔有上限，民居/收集站/兵种建筑可建多座（爆兵），其余同 kind 全场唯一。</summary>
         public bool BuildAt(Team team, BuildingDef def, Vector3 p)
         {
             if (def.kind == "tower")
             {
                 int towers = buildings.FindAll(b => b.team == team && b.kind == "tower").Count;
                 if (towers >= TowerCap) { if (team == playerTeam) Toast($"箭塔最多 {TowerCap} 座"); return false; }
+            }
+            else if (def.train != null)
+            {
+                int n = buildings.FindAll(b => b.team == team && b.kind == def.kind).Count;
+                if (n >= ProductionBuildingCap)
+                { if (team == playerTeam) Toast($"{def.name}最多 {ProductionBuildingCap} 座"); return false; }
             }
             else if (def.kind != "house" && def.kind != "resource_hub" && BuildingOfKind(team, def.kind) != null)
             { if (team == playerTeam) Toast($"{def.name}已建成"); return false; }

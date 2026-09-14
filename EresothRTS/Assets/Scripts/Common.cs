@@ -146,6 +146,8 @@ namespace Eresoth
         public static float ConstructionTime => RuntimeConfig.Data.constructionTime;
         public static int MaxBuildersPerBuilding => RuntimeConfig.Data.maxBuildersPerBuilding;
         public static float ConstructionDamageMultiplier => RuntimeConfig.Data.constructionDamageMultiplier;
+        public static float RepairRate => RuntimeConfig.Data.repairRate;
+        public static float RepairWoodPerHp => RuntimeConfig.Data.repairWoodPerHp;
         public static float CounterBonus => RuntimeConfig.Data.counterBonus;
         public static float SplashFrac => RuntimeConfig.Data.splashFrac;
         public static int HeroCap => RuntimeConfig.Data.heroCap;

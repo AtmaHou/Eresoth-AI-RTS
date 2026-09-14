@@ -10,7 +10,7 @@ namespace Eresoth
         // 军事（作用于军团）
         Move, Attack, AttackMove, Defend, Retreat, FocusFire, Regroup, Hold, Scout,
         // 经济（作用于阵营，持续计划）
-        Train, Research, Build, AssignWorkers,
+        Train, Research, Build, AssignWorkers, Repair,
         // 编制（作用于军团成员，提交即执行完毕）
         Reorganize
     }
@@ -88,7 +88,7 @@ namespace Eresoth
         public List<Vector3> scoutRoute;
         public int scoutIdx;
 
-        public bool IsEconomy => action >= OrderAction.Train && action <= OrderAction.AssignWorkers;
+        public bool IsEconomy => action >= OrderAction.Train && action <= OrderAction.Repair;
 
         public bool IsTerminal => state == OrderState.Completed || state == OrderState.Failed
             || state == OrderState.Cancelled || state == OrderState.Expired || state == OrderState.Overridden;
@@ -102,6 +102,7 @@ namespace Eresoth
             { OrderAction.Scout, "侦察" },
             { OrderAction.Train, "训练" }, { OrderAction.Research, "研究" },
             { OrderAction.Build, "建造" }, { OrderAction.AssignWorkers, "分配工人" },
+            { OrderAction.Repair, "修理" },
             { OrderAction.Reorganize, "编制调整" },
         };
 
@@ -121,6 +122,9 @@ namespace Eresoth
                     if (resource == "both")
                         return $"全部工人按 {ratio * 100f:0}% 采魔法矿、其余采木";
                     return $"工人 {ratio * 100f:0}% 采{(resource == "mana" ? "魔法矿" : "木头")}";
+                case OrderAction.Repair:
+                    return string.IsNullOrEmpty(targetId) || targetId == "all"
+                        ? "修理受损建筑" : $"修理 {BuildingName(targetId)}";
                 case OrderAction.Scout:
                     return "侦察一圈";
                 case OrderAction.Reorganize:

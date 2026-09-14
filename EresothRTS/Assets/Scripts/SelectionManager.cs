@@ -165,6 +165,20 @@ namespace Eresoth
                 return;
             }
 
+            // 右键己方受损建筑：让选中的工人前去修理
+            if (eb != null && eb.team == Game.I.playerTeam && eb.NeedsRepair)
+            {
+                int sent = 0;
+                foreach (var u in selected)
+                {
+                    var w = u.GetComponent<Worker>();
+                    if (w != null) { w.RepairAt(eb); sent++; }
+                    else u.CommandMove(hit.point);
+                }
+                if (sent > 0) Game.I.Toast($"已派 {sent} 个工人去修理{eb.DisplayName}");
+                return;
+            }
+
             var node = hit.collider.GetComponentInParent<ResourceNode>();
             if (node != null)
             {

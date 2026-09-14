@@ -19,16 +19,23 @@ namespace Eresoth
         void OnDestroy() { if (I == this) I = null; }
 
         /// <summary>登记经济军令（OrderDispatcher 校验通过后调用）。
-        /// 同类非训练计划互相替换，但只替换同批次的："依次造A和B"的队列不会被后一条普通建造命令清掉。</summary>
+        /// 同类非训练计划互相替换（只替换同批次；工人调度类"分工/修理"互相顶替），"依次造A和B"的队列不会被普通命令清掉。</summary>
         public void Activate(Order o)
         {
             if (o.action != OrderAction.Train)
                 for (int i = plans.Count - 1; i >= 0; i--)
-                    if (plans[i].action == o.action && plans[i].batchId == o.batchId && !plans[i].IsTerminal)
-                        plans[i].state = OrderState.Overridden;
+                {
+                    var p = plans[i];
+                    if (p.IsTerminal || p.batchId != o.batchId) continue;
+                    if (p.action == o.action || (IsWorkerDirective(p.action) && IsWorkerDirective(o.action)))
+                        p.state = OrderState.Overridden;
+                }
             plans.Add(o);
             o.state = OrderState.Executing;
         }
+
+        static bool IsWorkerDirective(OrderAction a)
+            => a == OrderAction.AssignWorkers || a == OrderAction.Repair;
 
         public void Cancel(Order o, string reason)
         {
@@ -133,6 +140,14 @@ namespace Eresoth
                         RebalanceWorkers(g, team, o.resource == "mana" ? "mana" : "wood",
                             Mathf.Clamp01(o.ratio <= 0f ? 0.5f : o.ratio), o.workerCount);
                     break;   // 持续计划：始终生效直到被替换/取消
+                }
+                case OrderAction.Repair:
+                {
+                    // 每跳把空闲工人派往受损最重的建筑（指定种类则只看该 kind）；修满自动收工
+                    var rb = g.FindRepairTarget(team, o.targetId);
+                    if (rb != null)
+                        g.PullWorkersToRepair(team, rb, o.workerCount > 0 ? o.workerCount : 2);
+                    break;   // 持续计划：直到被替换/取消
                 }
             }
         }
