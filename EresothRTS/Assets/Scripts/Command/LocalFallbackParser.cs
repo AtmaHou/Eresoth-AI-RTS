@@ -133,13 +133,21 @@ namespace Eresoth
             var forces = ForceManager.I.OfTeam(Game.I.playerTeam);
             if (forces.Count == 0) return false;
 
-            // 找出文本中所有军团指代及其位置
+            // 找出文本中所有军团指代及其位置（名称/ID + "1队/一队/军团一"数字指代）
             var mentions = new List<(Force f, int pos)>();
+            var seen = new HashSet<Force>();
             foreach (var f in forces)
             {
                 int p = text.IndexOf(f.name);
                 if (p < 0) p = text.IndexOf(f.id);
-                if (p >= 0) mentions.Add((f, p));
+                if (p >= 0 && seen.Add(f)) mentions.Add((f, p));
+            }
+            var mm = System.Text.RegularExpressions.Regex.Matches(text, @"(?:军团|第)?([0-9一二两三四五六七八九]{1,2})(?:军团|队|军)");
+            foreach (System.Text.RegularExpressions.Match m in mm)
+            {
+                int idx = ReferenceResolver.ForceIndex(m.Groups[1].Value);
+                if (idx <= 0 || idx > forces.Count) continue;
+                if (seen.Add(forces[idx - 1])) mentions.Add((forces[idx - 1], m.Index));
             }
             int kwPos = text.IndexOf(keyword);
             Force dest = null; int destPos = -1;

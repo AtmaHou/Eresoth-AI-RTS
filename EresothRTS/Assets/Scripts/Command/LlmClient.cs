@@ -134,6 +134,47 @@ namespace Eresoth
             return s.Length <= max ? s : s.Substring(0, max) + "…";
         }
 
+        // ---------------- 连通性测试（开局菜单"测试连通性"按钮，不改动已保存配置） ----------------
+
+        /// <summary>用给定参数发一次最小 chat 请求，回报是否连通与延迟。仅测试，不保存、不切换配置。</summary>
+        public void TestConnection(string baseUrl, string apiKey, string model, Action<bool, string> onDone)
+        {
+            if (string.IsNullOrWhiteSpace(baseUrl)) { onDone?.Invoke(false, "接口地址为空"); return; }
+            if (string.IsNullOrWhiteSpace(apiKey)) { onDone?.Invoke(false, "密钥为空"); return; }
+            if (string.IsNullOrWhiteSpace(model)) { onDone?.Invoke(false, "模型名为空"); return; }
+            StartCoroutine(TestRequest(baseUrl.TrimEnd('/'), apiKey.Trim(), model.Trim(), onDone));
+        }
+
+        IEnumerator TestRequest(string baseUrl, string apiKey, string model, Action<bool, string> onDone)
+        {
+            float t0 = Time.realtimeSinceStartup;
+            string body = "{\"model\":" + JsonString(model)
+                + ",\"max_tokens\":8,\"temperature\":0"
+                + ",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}";
+            using var req = new UnityWebRequest(baseUrl + "/chat/completions", "POST");
+            req.uploadHandler = new UploadHandlerRaw(System.Text.Encoding.UTF8.GetBytes(body));
+            req.downloadHandler = new DownloadHandlerBuffer();
+            req.SetRequestHeader("Content-Type", "application/json");
+            req.SetRequestHeader("Authorization", "Bearer " + apiKey);
+            req.timeout = 10;
+
+            yield return req.SendWebRequest();
+            int ms = Mathf.RoundToInt((Time.realtimeSinceStartup - t0) * 1000f);
+
+            if (req.result != UnityWebRequest.Result.Success)
+            {
+                onDone?.Invoke(false, $"连接失败（{ms}ms）：{req.error}"
+                    + (string.IsNullOrEmpty(req.downloadHandler?.text) ? "" : $" · {Truncate(req.downloadHandler.text)}"));
+                yield break;
+            }
+            if (ExtractContent(req.downloadHandler.text) == null)
+            {
+                onDone?.Invoke(false, $"已连通但返回异常（{ms}ms）：{Truncate(req.downloadHandler.text)}");
+                yield break;
+            }
+            onDone?.Invoke(true, $"连通正常 · {model} · {ms}ms");
+        }
+
         /// <summary>从 OpenAI 响应中取 choices[0].message.content（最小解析，不引第三方库）。</summary>
         static string ExtractContent(string json)
         {

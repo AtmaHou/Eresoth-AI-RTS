@@ -14,6 +14,8 @@ namespace Eresoth
         bool showCommandPanel;   // F9：指挥调试面板（军团状态 + 事件战报）
         bool showLlmSettings;    // F10 / 面板按钮：LLM 配置（只在开局菜单，对局内不出现）
         string llmUrl = "", llmKey = "", llmModel = "", llmMsg = "";
+        bool llmTesting;        // 连通性测试进行中
+        string llmTestMsg = ""; // 连通性测试结果（含延迟）
 
         void Start() { sel = GetComponent<SelectionManager>(); }
 
@@ -47,6 +49,19 @@ namespace Eresoth
             LlmClient.I.ClearLocal();
             llmKey = "";
             llmMsg = LlmClient.I.Available ? "已清除（改用根目录配置）" : "已清除，LLM 不可用（走兜底）";
+        }
+
+        /// <summary>连通性测试：用输入框里的参数实测一次（不保存、不影响当前配置），回报延迟。</summary>
+        void TestLlmConnection()
+        {
+            if (LlmClient.I == null || llmTesting) return;
+            llmTesting = true;
+            llmTestMsg = "测试中…";
+            LlmClient.I.TestConnection(llmUrl, llmKey, llmModel, (ok, msg) =>
+            {
+                llmTesting = false;
+                llmTestMsg = msg;
+            });
         }
 
         void EnsureStyles()
@@ -112,7 +127,7 @@ namespace Eresoth
             GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), Texture2D.whiteTexture);
             GUI.color = Color.white;
 
-            float w = 520, h = 452 + (showLlmSettings ? 164 : 0);
+            float w = 520, h = 452 + (showLlmSettings ? 196 : 0);
             var r = new Rect((Screen.width - w) / 2f, (Screen.height - h) / 2f, w, h);
             GUI.Box(r, GUIContent.none);
             GUI.Label(new Rect(r.x, r.y + 16, r.width, 40), "厄瑞索斯 RTS", big);
@@ -201,11 +216,22 @@ namespace Eresoth
             if (GUI.Button(new Rect(fx, ty, 100, 24), "保存到本机")) SaveLlmSettings();
             GUI.enabled = LlmClient.I != null && LlmClient.I.HasLocalConfig;
             if (GUI.Button(new Rect(fx + 108, ty, 100, 24), "清除本机配置")) ClearLlmSettings();
+            GUI.enabled = !llmTesting && !string.IsNullOrWhiteSpace(llmUrl) && !string.IsNullOrWhiteSpace(llmKey);
+            if (GUI.Button(new Rect(fx + 216, ty, 100, 24), llmTesting ? "测试中…" : "测试连通性")) TestLlmConnection();
             GUI.enabled = true;
-            GUI.Label(new Rect(fx + 216, ty + 2, r.width - 266, 22), llmMsg, mid);
+            GUI.Label(new Rect(fx + 324, ty + 2, r.width - 374, 22), llmMsg, mid);
             ty += 28;
+            // 连通性测试结果（显式红绿灯 + 延迟）
+            if (!string.IsNullOrEmpty(llmTestMsg))
+            {
+                bool ok = llmTestMsg.StartsWith("连通正常");
+                GUI.color = ok ? new Color(.6f, 1f, .7f) : new Color(1f, .6f, .55f);
+                GUI.Label(new Rect(fx, ty, r.width - 100, 20), "● " + llmTestMsg, mid);
+                GUI.color = Color.white;
+                ty += 22;
+            }
             GUI.Label(new Rect(fx, ty, r.width - 100, 34),
-                "保存位置（本机，不入库）：\n" + SplitPath(LlmClient.LocalConfigPath), small);
+                "配置保存位置（本机文件，绝不进入 git 仓库）：\n" + SplitPath(LlmClient.LocalConfigPath), small);
         }
 
         /// <summary>长路径折行：在第 50 个字符前的最后一个反斜杠处断开，避免超出面板。</summary>
