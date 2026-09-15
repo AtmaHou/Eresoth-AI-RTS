@@ -37,8 +37,12 @@ namespace Eresoth
 
             // 军事意图
             string forceId = ParseForce(text);
-            string targetId = ParseTarget(text);
             string action = ParseMilitaryAction(text);
+            string targetId = ParseTarget(text);
+            // 裸"主基地/大本营"按动作分敌我：防守/撤退类→己方主基地，其余（进攻等）→敌方主基地
+            if (targetId == null && (text.Contains("主基地") || text.Contains("大本营")))
+                targetId = action == "defend" || action == "hold" || action == "retreat" || action == "regroup"
+                    ? "own_main_base" : "enemy_main_base";
             if (action != null && forceId != null)
             {
                 var o = new DebugCommandRunner.OrderDto { force_id = forceId, action = action };

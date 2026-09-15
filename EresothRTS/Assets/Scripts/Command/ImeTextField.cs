@@ -6,23 +6,40 @@ namespace Eresoth
     /// Windows 构建里收不到 IME 合成串（表现为只能输英文/字母），这里改为手动管理文本：
     /// 合成串（Input.compositionString）实时拼在末尾显示，选词提交时写入文本。
     /// 编辑能力刻意保持最小：末尾追加 / 退格 / Ctrl+V 粘贴，足够命令输入场景；
-    /// 不支持光标定位与多行，需要富文本编辑的场景不要用本控件。</summary>
+    /// 不支持光标定位与多行，需要富文本编辑的场景不要用本控件。
+    /// 焦点走 GUIUtility.keyboardControl + GetControlID（与原生 TextField 一致）：
+    /// GUI.FocusControl/GetNameOfFocusedControl 依赖 SetNextControlName 注册的命名控件表，
+    /// 纯自定义控件没有注册过名字，那两个 API 会静默失效（点了没光标、敲不进字）。</summary>
     public static class ImeTextField
     {
         static string prevComp = "";   // 上一帧 IME 合成串（跨控件隔离）
         static string lastCtrl = "";
 
-        /// <summary>绘制输入框并处理输入，text 为已确认文本，返回新的已确认文本。</summary>
-        public static string Draw(Rect r, string text, string ctrlName, GUIStyle style, int maxLen = 200)
+        static int IdOf(string ctrlName) => GUIUtility.GetControlID(ctrlName.GetHashCode(), FocusType.Keyboard);
+
+        /// <summary>控件是否持有键盘焦点。</summary>
+        public static bool IsFocused(string ctrlName) => GUIUtility.keyboardControl == IdOf(ctrlName);
+
+        /// <summary>聚焦指定控件（FocusControl 对未注册的自定义控件名无效，用本方法代替）。</summary>
+        public static void Focus(string ctrlName) => GUIUtility.keyboardControl = IdOf(ctrlName);
+
+        /// <summary>绘制输入框并处理输入，text 为已确认文本，返回新的已确认文本。
+        /// placeholder：空且未聚焦时的灰色提示语；聚焦时显示闪烁光标（合成串期间常亮）。</summary>
+        public static string Draw(Rect r, string text, string ctrlName, GUIStyle style, int maxLen = 200, string placeholder = null)
         {
             var e = Event.current;
-            if (e.type == EventType.MouseDown && r.Contains(e.mousePosition))
+            int id = IdOf(ctrlName);
+            bool focused = GUIUtility.keyboardControl == id;
+            if (e.type == EventType.MouseDown)
             {
-                GUI.FocusControl(ctrlName);
-                e.Use();
+                if (r.Contains(e.mousePosition))
+                {
+                    GUIUtility.keyboardControl = id;
+                    e.Use();
+                }
+                else if (focused) GUIUtility.keyboardControl = 0;   // 点到输入框外：失焦，游戏快捷键恢复
+                focused = GUIUtility.keyboardControl == id;
             }
-
-            bool focused = GUI.GetNameOfFocusedControl() == ctrlName;
             // 聚焦时把键盘路由给输入法（手动模式），失焦恢复自动，避免游戏快捷键被 IME 吞掉
             Input.imeCompositionMode = focused ? IMECompositionMode.On : IMECompositionMode.Auto;
             if (lastCtrl != ctrlName) { prevComp = ""; lastCtrl = ctrlName; }
@@ -60,13 +77,24 @@ namespace Eresoth
                 }
             }
 
-            // 显示：内容超出框宽只展示末尾（光标恒在末尾），聚焦时画光标
+            // 显示：输入框底色（聚焦更亮）+ 占位提示 + 末尾光标
+            GUI.color = focused ? new Color(1f, 1f, 1f, .18f) : new Color(1f, 1f, 1f, .10f);
+            GUI.DrawTexture(r, Texture2D.whiteTexture);
+            GUI.color = Color.white;
+            GUI.Box(r, GUIContent.none);
+
             float charW = Mathf.Max(6f, style.fontSize * 0.52f);
             int fit = Mathf.Max(4, (int)((r.width - 14) / charW));
             string shown = text + comp;
-            string disp = shown.Length > fit ? "…" + shown.Substring(shown.Length - fit) : shown;
-            GUI.Box(r, GUIContent.none);
-            GUI.Label(new Rect(r.x + 4, r.y + 2, r.width - 8, r.height - 4), disp + (focused ? "▏" : ""), style);
+            bool showPh = placeholder != null && shown.Length == 0 && !focused;
+            string disp = showPh ? placeholder
+                : shown.Length > fit ? "…" + shown.Substring(shown.Length - fit) : shown;
+            // 光标：合成串期间常亮，空闲按 0.65s 周期闪烁
+            bool blinkOn = focused && (comp.Length > 0 || Time.unscaledTime % 1f < 0.65f);
+            string cur = showPh ? "" : blinkOn ? "▏" : "";
+            GUI.color = showPh ? new Color(.62f, .62f, .66f) : Color.white;
+            GUI.Label(new Rect(r.x + 4, r.y + 2, r.width - 8, r.height - 4), disp + cur, style);
+            GUI.color = Color.white;
             return text;
         }
     }

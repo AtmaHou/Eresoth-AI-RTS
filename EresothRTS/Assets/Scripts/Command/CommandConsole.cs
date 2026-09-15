@@ -294,6 +294,15 @@ namespace Eresoth
                 return;
             }
 
+            // 全局回车聚焦输入框：游戏内任何时刻按 Enter 即可开始打字（输入框不够显眼时的兜底入口）
+            if (Event.current.type == EventType.KeyDown
+                && (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter)
+                && !ImeTextField.IsFocused("cmdInput"))
+            {
+                focusInput = true;
+                Event.current.Use();
+            }
+
             var tips = BuildTips();
             float tipsH = 20 + Mathf.CeilToInt(tips.Count / 2f) * 24 + 4;
             float w = 340, x = Screen.width - w - 8;
@@ -321,6 +330,9 @@ namespace Eresoth
             for (int i = 0; i < msgs.Count; i++) viewH += MsgHeight(msgs[i], w - 46);
             scroll = GUI.BeginScrollView(new Rect(x + 8, top + 28, w - 16, msgH),
                 scroll, new Rect(0, 0, w - 40, Mathf.Max(viewH, msgH - 4)));
+            if (msgs.Count == 0)
+                GUI.Label(new Rect(4, 4, w - 60, 44),
+                    "点击底部输入框或按 Enter，输入文字指令指挥全军。\n例：一军团进攻主基地、全军撤退、造4个弓箭手", rawStyle);
             float y = 4;
             for (int i = 0; i < msgs.Count; i++)
             {
@@ -377,13 +389,13 @@ namespace Eresoth
             }
             GUI.EndScrollView();
 
-            // 输入行（ImeTextField 支持中文输入法：末尾追加/退格/粘贴，合成串实时预览）
+            // 输入行（ImeTextField 支持中文输入法：末尾追加/退格/粘贴，合成串实时预览，光标闪烁）
             float iy = top + 28 + msgH + 4;
-            input = ImeTextField.Draw(new Rect(x + 8, iy, w - 92, 28), input, "cmdInput", style);
-            if (focusInput) { GUI.FocusControl("cmdInput"); focusInput = false; }
+            input = ImeTextField.Draw(new Rect(x + 8, iy, w - 92, 28), input, "cmdInput", style, 200, "输入指令，回车发送");
+            if (focusInput) { ImeTextField.Focus("cmdInput"); focusInput = false; }
             bool enter = Event.current.type == EventType.KeyDown
                 && (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter)
-                && GUI.GetNameOfFocusedControl() == "cmdInput";
+                && ImeTextField.IsFocused("cmdInput");
             GUI.enabled = !waiting;
             if (GUI.Button(new Rect(x + w - 80, iy, 72, 28), waiting ? "思考中…" : "发送")) enter = true;
             GUI.enabled = true;
@@ -418,7 +430,7 @@ namespace Eresoth
             if (GUI.Button(new Rect(0, 0, sr.width, sr.height), "试试：" + shown)) { input = s; focusInput = true; }
             GUI.EndGroup();
 
-            TypingActive = GUI.GetNameOfFocusedControl() == "cmdInput";
+            TypingActive = ImeTextField.IsFocused("cmdInput");
         }
     }
 }
