@@ -57,6 +57,10 @@ EresothRTS/AssetStoreTools*
 llm_config.json
 # 对局日志（LLM 指挥数据），每局本地生成，属运行数据不入库
 EresothRTS/command_log.jsonl
+# 指令缓存（玩家标记"成功"的指令→格式化操作），本机运行数据不入库
+EresothRTS/command_cache.json
+# 常用指令配置（开始界面编辑的本机偏好），不入库
+EresothRTS/favorite_commands.json
 # LLM 连接日志（请求/响应/错误现场），含密钥配置的请求头不落盘、但请求体可能含提示词，不入库
 EresothRTS/llm_log.jsonl
 

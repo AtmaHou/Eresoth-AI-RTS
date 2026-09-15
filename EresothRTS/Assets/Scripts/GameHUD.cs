@@ -13,8 +13,11 @@ namespace Eresoth
         GUIStyle mid, big, small;
         bool showCommandPanel;   // F9：指挥调试面板（军团状态 + 事件战报）
         bool showLlmSettings;    // F10 / 面板按钮：LLM 配置（只在开局菜单，对局内不出现）
+        bool showFavSettings;    // 常用指令配置（与 LLM 配置共用菜单底部区域，互斥展开）
         string llmUrl = "", llmKey = "", llmModel = "", llmMsg = "";
         bool llmThinking;       // 推理模式（thinking）：模型先输出推理过程，需更大 token 预算与更长超时
+        string favNew = "";     // 常用指令手动输入
+        Vector2 favScroll, favCacheScroll;
         bool llmTesting;        // 连通性测试进行中
         string llmTestMsg = ""; // 连通性测试结果（含延迟）
 
@@ -31,10 +34,19 @@ namespace Eresoth
         {
             showLlmSettings = !showLlmSettings;
             if (!showLlmSettings) return;
+            showFavSettings = false;
             if (LlmClient.I != null) LlmClient.I.GetConfig(out llmUrl, out llmKey, out llmModel, out llmThinking);
             if (string.IsNullOrWhiteSpace(llmUrl)) llmUrl = "https://api.openai.com/v1";
             if (string.IsNullOrWhiteSpace(llmModel)) llmModel = "gpt-4o-mini";
             llmMsg = "";
+        }
+
+        void ToggleFavSettings()
+        {
+            showFavSettings = !showFavSettings;
+            if (!showFavSettings) return;
+            showLlmSettings = false;
+            favNew = "";
         }
 
         void SaveLlmSettings()
@@ -148,15 +160,20 @@ namespace Eresoth
             GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), Texture2D.whiteTexture);
             GUI.color = Color.white;
 
-            float w = 520, h = 452 + (showLlmSettings ? 196 : 0);
+            float drawerH = showLlmSettings ? 196 : showFavSettings ? 300 : 0;
+            float w = 520, h = 452 + drawerH;
             var r = new Rect((Screen.width - w) / 2f, (Screen.height - h) / 2f, w, h);
             GUI.Box(r, GUIContent.none);
             GUI.Label(new Rect(r.x, r.y + 16, r.width, 40), "厄瑞索斯 RTS", big);
 
-            // LLM 设置入口（配置只放菜单，对局内不再出现）；按钮上直接显示就绪状态
+            // LLM 设置入口（配置只放菜单，对局内不再出现）；按钮上直接显示就绪状态。
+            // 入口放面板右下角（"开始游戏"右侧纵向堆叠），避免遮挡顶部标题
             bool ready = LlmClient.I != null && LlmClient.I.Available;
-            Btn(new Rect(r.x + w - 158, r.y + 18, 138, 30),
+            Btn(new Rect(r.x + w - 148, r.y + 354, 138, 30),
                 $"LLM：{(ready ? "已就绪" : "未配置")}", ToggleLlmSettings, true);
+            // 常用指令入口：配置对局内指挥台"高频命令"区
+            Btn(new Rect(r.x + w - 148, r.y + 388, 138, 30),
+                $"常用指令：{FavoriteCommands.Items.Count}条", ToggleFavSettings, true);
 
             // 阵营选择：人类 / 不死族（另一方由 AI 操控）
             Btn(new Rect(r.x + 50, r.y + 72, 110, 32),
@@ -211,7 +228,87 @@ namespace Eresoth
             Btn(new Rect(r.x + 140, r.y + 384, 200, 42), "开 始 游 戏", () => g.StartGame(), true);
 
             if (showLlmSettings) DrawLlmSettings(r);
+            else if (showFavSettings) DrawFavSettings(r);
         }
+
+        /// <summary>菜单内的常用指令配置区：手动输入 / 默认样例 / 从指令缓存勾选，
+        /// 保存到项目根的 favorite_commands.json（可手编辑）；对局内指挥台"高频命令"区优先展示。</summary>
+        void DrawFavSettings(Rect r)
+        {
+            const float lblW = 64, rowH = 22;
+            float fx = r.x + 50, fw = r.width - 100 - lblW - 8;
+            float ty = r.y + 440;
+            GUI.Label(new Rect(fx, ty, 460, 20), "常用指令（对局内指挥台高频命令区，点击即填入输入框）", mid);
+            ty += 24;
+
+            // 手动输入（ImeTextField 支持中文输入法）
+            GUI.Label(new Rect(fx, ty, lblW, rowH), "手动输入", mid);
+            favNew = ImeTextField.Draw(new Rect(fx + lblW, ty, fw - 52, rowH), favNew, "favNew", small);
+            GUI.enabled = !string.IsNullOrWhiteSpace(favNew) && !FavoriteCommands.Items.Contains(favNew.Trim())
+                && FavoriteCommands.Items.Count < FavoriteCommands.Max;
+            if (GUI.Button(new Rect(fx + lblW + fw - 48, ty, 48, rowH), "添加") && GUI.enabled) { FavoriteCommands.Add(favNew); favNew = ""; }
+            GUI.enabled = true;
+            ty += rowH + 4;
+
+            // 默认样例（点击即加入）
+            GUI.Label(new Rect(fx, ty, lblW, rowH), "默认样例", mid);
+            string[] samples = { "全军撤退", "全军集火敌方英雄", "工人采魔法矿" };
+            for (int i = 0; i < samples.Length; i++)
+            {
+                string s = samples[i];
+                bool already = FavoriteCommands.Items.Contains(s);
+                GUI.enabled = !already && FavoriteCommands.Items.Count < FavoriteCommands.Max;
+                if (GUI.Button(new Rect(fx + lblW + i * ((fw - 16) / 3f + 4), ty, (fw - 16) / 3f, rowH),
+                    new GUIContent(already ? Trunc(s, 8) + " ✓" : Trunc(s, 10), s))) FavoriteCommands.Add(s);
+            }
+            GUI.enabled = true;
+            ty += rowH + 4;
+
+            // 已配置列表（✕ 移除）
+            GUI.Label(new Rect(fx, ty, 300, 18), $"已配置（{FavoriteCommands.Items.Count}/{FavoriteCommands.Max}，✕ 移除）：", small);
+            ty += 18;
+            float listH = Mathf.Min(FavoriteCommands.Items.Count, 4) * 20;
+            if (listH > 0)
+            {
+                favScroll = GUI.BeginScrollView(new Rect(fx, ty, r.width - 100, listH), favScroll,
+                    new Rect(0, 0, r.width - 118, FavoriteCommands.Items.Count * 20));
+                for (int i = 0; i < FavoriteCommands.Items.Count; i++)
+                {
+                    if (GUI.Button(new Rect(0, i * 20, 20, 18), "✕")) FavoriteCommands.RemoveAt(i);
+                    GUI.Label(new Rect(24, i * 20, r.width - 150, 18), Trunc(FavoriteCommands.Items[i], 30), small);
+                }
+                GUI.EndScrollView();
+                ty += listH + 4;
+            }
+
+            // 从指令缓存勾选（按命中次数排序）
+            var cache = CommandCache.EntriesByHits();
+            if (cache.Count > 0)
+            {
+                GUI.Label(new Rect(fx, ty, 400, 18), $"从指令缓存添加（按命中排序，共{cache.Count}条，+ 添加）：", small);
+                ty += 18;
+                float ch = Mathf.Min(cache.Count, 3) * 20;
+                favCacheScroll = GUI.BeginScrollView(new Rect(fx, ty, r.width - 100, ch), favCacheScroll,
+                    new Rect(0, 0, r.width - 118, cache.Count * 20));
+                for (int i = 0; i < cache.Count; i++)
+                {
+                    var e = cache[i];
+                    bool already = FavoriteCommands.Items.Contains(e.input);
+                    GUI.enabled = !already && FavoriteCommands.Items.Count < FavoriteCommands.Max;
+                    if (GUI.Button(new Rect(0, i * 20, 24, 18), "+")) FavoriteCommands.Add(e.input);
+                    GUI.enabled = true;
+                    GUI.Label(new Rect(28, i * 20, r.width - 220, 18), Trunc(e.input, 30), small);
+                    GUI.Label(new Rect(r.width - 190, i * 20, 70, 18), $"命中{e.hits}", small);
+                }
+                GUI.EndScrollView();
+                ty += ch + 4;
+            }
+
+            GUI.Label(new Rect(fx, ty, r.width - 100, 32),
+                "保存位置（本机文件，可手动编辑）：\n" + SplitPath(FavoriteCommands.FilePath), small);
+        }
+
+        static string Trunc(string s, int n) => s.Length > n ? s.Substring(0, n) + "…" : s;
 
         /// <summary>菜单内的 LLM 配置区：运行时填写，保存到项目目录之外的本机文件（git 提交不到）。</summary>
         void DrawLlmSettings(Rect r)
