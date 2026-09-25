@@ -4,14 +4,24 @@ using UnityEngine;
 namespace Eresoth
 {
     /// <summary>第一阶段脚本 AI：采集 → 建军 → 攀科技 → 按克制配比持续暴兵（含英雄）→ 集结成波 → 多轮进攻。
-    /// 波次管理：兵力到阈值即集结一波压上；进攻中新兵持续增援；残部回撤重整后再起下一波，规模逐波递增；
+    /// 波次管理：兵力到阈值即集结一波压上；进攻中增援攒组后再统一压上（不单个送兵）；残部回撤重整后再起下一波，规模逐波递增；
     /// 目标被摧毁后自动续打最近玩家建筑，保证持续多轮进攻压力。
     /// 兵种搭配：目标编制 = 基础配比（步:弓:骑 ≈ .38:.32:.30）按玩家兵种构成向克制兵种偏移
-    /// （步克骑、弓克步、骑克弓），每类限幅 15%~55% 保持混合编制；缺口最大的兵种优先且豁免经济门槛。
+    /// （步克骑、弓克步、骑克弓）；针对性出兵仅普通及以上难度启用（简单难度用固定配比），
+    /// 困难难度克制偏移更强、进攻波次规模更大、防御塔更多。每类限幅 15%~55% 保持混合编制；缺口最大的兵种优先且豁免经济门槛。
+    /// 防御建设：三兵种建筑齐备后按难度主动补防御塔（简单 1 / 普通 3 / 困难 5）。
     /// 战术行为：基地遇袭全军回防、集结期派 2 骑兵骚扰暴露的采集工人。
     /// 后续将被"执行体 AI + LLM 参谋"双层结构替换（设计文档 5.1）。</summary>
     public class EnemyAI : MonoBehaviour
     {
+        /// <summary>各难度 AI 主动建造的防御塔上限。</summary>
+        static int TowerCap => MapSettings.difficulty switch
+        {
+            Difficulty.Easy => 1,
+            Difficulty.Hard => 5,
+            _ => 3,
+        };
+
         float t;
         int wave;                        // 已发起的进攻波次（决定下一波规模）
         float assaultCooldown;           // 波次间隔冷却
@@ -79,6 +89,9 @@ namespace Eresoth
             else if (g.BuildingOfKind(ai, cavKind) == null
                 && g.wood[aiIdx] >= cavB.wood && g.mana[aiIdx] >= cavB.mana)
                 g.BuildStructure(ai, cavB);
+            else if (g.buildings.FindAll(b => b.team == ai && b.kind == "tower").Count < TowerCap
+                && g.wood[aiIdx] >= GameConfig.Tower.wood && g.mana[aiIdx] >= GameConfig.Tower.mana)
+                g.BuildStructure(ai, GameConfig.Tower);    // 主动布防：三兵种建筑齐备后按难度补防御塔
             else if (g.buildings.FindAll(b => b.team == ai && b.kind == "resource_hub").Count < 2
                 && g.wood[aiIdx] >= GameConfig.Lumber.wood && g.mana[aiIdx] >= GameConfig.Lumber.mana)
                 g.BuildForwardResourceHub(ai);             // 远端收集站：主矿/分矿交付与采集加成
@@ -116,9 +129,11 @@ namespace Eresoth
                 if (d > 26f && d > loneD) { loneD = d; loneWorker = u; }
             }
 
-            // 本波规模：逐波递增直至上限（wave 在每次发起进攻时 +1）
-            int need = Mathf.Min(GameConfig.AiMaxAssaultForce,
-                GameConfig.AiMinAssaultForce + wave * 2);
+            // 本波规模：逐波递增直至上限（wave 在每次发起进攻时 +1）；简单更小、困难更大
+            int minForce = GameConfig.AiMinAssaultForce, maxForce = GameConfig.AiMaxAssaultForce;
+            if (MapSettings.difficulty == Difficulty.Easy) { minForce = Mathf.Max(4, minForce - 2); maxForce = Mathf.Max(6, maxForce - 4); }
+            else if (MapSettings.difficulty == Difficulty.Hard) { minForce += 2; maxForce += 4; }
+            int need = Mathf.Min(maxForce, minForce + wave * 2);
             if (MapSettings.demoMode) need = Mathf.Max(4, need - 2);   // 演示模式：首波更早到场
 
             // 6. 持续暴兵：目标编制 = 克制配比 × 本波规模，按各类缺口训练（混合搭配 + 战损补充 + 针对玩家）
@@ -221,13 +236,23 @@ namespace Eresoth
                 // 9a. 目标失效 → 续打离集结点最近的玩家成品建筑（保证多轮连续施压）
                 if (assaultTarget == null || !assaultTarget.Alive)
                     assaultTarget = NextAssaultTarget(g, ai);
-                // 9b. 增援与续攻：交战中的不打断；基地附近新兵/残部统一指向本波目标
+                // 9b. 增援与续攻：交战中的不打断；基地侧新兵/残部不单个送——先在集结点攒够一组
+                //     再统一指向本波目标；已推进到战场的散兵直接续攻
                 if (assaultTarget != null)
+                {
+                    var reserves = new List<Unit>();
                     foreach (var u in force)
                     {
                         if (u.target != null && u.target.Alive) continue;
-                        u.CommandAttack(assaultTarget);
+                        if (Vector3.Distance(u.transform.position, hall.transform.position) > 30f)
+                        { u.CommandAttack(assaultTarget); continue; }   // 已在战场：继续压上
+                        reserves.Add(u);
                     }
+                    if (reserves.Count >= Mathf.Max(3, need / 3))
+                        foreach (var u in reserves) u.CommandAttack(assaultTarget);
+                    else
+                        foreach (var u in reserves) u.CommandMove(rally + Jitter(3f));
+                }
                 // 9c. 撤退：进攻超过 8 秒后，"仍在战场"（正在交战或已远离基地推进）的兵力
                 //     不足本波 1/3，或一波拖超过 60 秒，则残部回撤集结点，冷却后再起下一波
                 assaultTimer += GameConfig.AiDecisionInterval;
@@ -256,14 +281,16 @@ namespace Eresoth
         }
 
         /// <summary>期望兵种配比（x=步 y=弓 z=骑）：基础 .38/.32/.30，按玩家兵种构成向克制兵种偏移
-        /// （步克骑、弓克步、骑克弓，玩家某类 ≥3 才启用），每类限幅 15%~55% 保持混合编制。</summary>
+        /// （步克骑、弓克步、骑克弓，玩家某类 ≥3 才启用），每类限幅 15%~55% 保持混合编制。
+        /// 针对性克制仅普通及以上难度启用；困难难度偏移更强。</summary>
         static Vector3 DesiredComp(int pInf, int pRng, int pCav)
         {
             Vector3 w = new(.38f, .32f, .30f);
+            if (MapSettings.difficulty == Difficulty.Easy) return w;   // 简单：固定基础配比，不针对玩家
             float total = pInf + pRng + pCav;
             if (total >= 3f)
             {
-                const float pull = .8f;
+                float pull = MapSettings.difficulty == Difficulty.Hard ? 1.1f : .8f;
                 w.x += pull * pCav / total;   // 玩家骑兵多 → 补步兵（步克骑）
                 w.y += pull * pInf / total;   // 玩家步兵多 → 补远程（弓克步）
                 w.z += pull * pRng / total;   // 玩家远程多 → 补骑兵（骑克弓）
@@ -337,6 +364,7 @@ namespace Eresoth
             if (rng == null) Need(rngB);
             if (cav == null) Need(cavB);
             if (g.buildings.FindAll(b => b.team == ai && b.kind == "resource_hub").Count < 2) Need(GameConfig.Lumber);
+            if (g.buildings.FindAll(b => b.team == ai && b.kind == "tower").Count < TowerCap) Need(GameConfig.Tower);
             if (g.PopCount(aiIdx) > g.PopCap(ai) - 8) Need(GameConfig.House);
 
             // 当前库存缺口

@@ -250,9 +250,9 @@ MonoBehaviour:
     size: 5
     trainUnitIds: []
     techIds: []
-    atk: 0
-    atkRange: 0
-    atkCd: 0
+    atk: 75
+    atkRange: 12
+    atkCd: 1.3
     prefab: {fileID: 0}
   - kind: barracks
     name: 兵营
@@ -312,13 +312,13 @@ MonoBehaviour:
     name: 箭塔
     wood: 20
     mana: 80
-    hp: 350
+    hp: 650
     size: 2.6
     trainUnitIds: []
     techIds: []
-    atk: 12
+    atk: 22
     atkRange: 11
-    atkCd: 1
+    atkCd: 0.9
     prefab: {fileID: 0}
   - kind: house
     name: 民居

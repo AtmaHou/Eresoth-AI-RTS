@@ -60,12 +60,33 @@ namespace Eresoth
             "全军撤退",
         };
 
+        bool enterQueued;   // Update 里 Input 轮询到的回车，交给 OnGUI 消费（见 Update）
+        bool compPrevFrame; // 上一帧是否有 IME 合成串（刚上屏的回车是选词确认，不能当发送）
+
         void OnEnable()
         {
             I = this;
             logPath = Path.Combine(Application.dataPath, "../command_log.jsonl");
         }
         void OnDestroy() { if (I == this) I = null; }
+
+        void Update()
+        {
+            if (Game.I == null || !Game.I.started || Game.I.over || collapsed) return;
+            string comp = Input.compositionString ?? "";
+            bool compNow = comp.Length > 0;
+
+            // 回车发送改走 Input 轮询：IME 手动模式下（Input.imeCompositionMode = On）Unity 可能
+            // 不把 Enter 的 KeyDown 事件投递给 OnGUI，事件法发不出去。合成串刚结束那记回车是
+            // 输入法在上屏选词，需等一帧再允许发送。
+            if ((Input.GetKeyDown(KeyCode.Return) || Input.GetKeyDown(KeyCode.KeypadEnter))
+                && !compNow && !compPrevFrame)
+            {
+                if (ImeTextField.IsFocused("cmdInput")) enterQueued = true;
+                else focusInput = true;   // 全局兜底：任何时刻按回车先聚焦输入框
+            }
+            compPrevFrame = compNow;
+        }
 
         /// <summary>发送入口（UI 与将来语音共用）。</summary>
         public void Send(string text)
@@ -393,9 +414,10 @@ namespace Eresoth
             float iy = top + 28 + msgH + 4;
             input = ImeTextField.Draw(new Rect(x + 8, iy, w - 92, 28), input, "cmdInput", style, 200, "输入指令，回车发送");
             if (focusInput) { ImeTextField.Focus("cmdInput"); focusInput = false; }
-            bool enter = Event.current.type == EventType.KeyDown
+            bool enter = enterQueued || (Event.current.type == EventType.KeyDown
                 && (Event.current.keyCode == KeyCode.Return || Event.current.keyCode == KeyCode.KeypadEnter)
-                && ImeTextField.IsFocused("cmdInput");
+                && ImeTextField.IsFocused("cmdInput"));
+            enterQueued = false;
             GUI.enabled = !waiting;
             if (GUI.Button(new Rect(x + w - 80, iy, 72, 28), waiting ? "思考中…" : "发送")) enter = true;
             GUI.enabled = true;

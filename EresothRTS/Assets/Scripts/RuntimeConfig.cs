@@ -118,12 +118,13 @@ namespace Eresoth
 
             c.buildings = new()
             {
-                new BuildingConfig { kind="hall", name="主基地", wood=0, mana=0, hp=1500, size=5.0f },
+                // 主基地自带城防攻击：约 58 dps，前期 8-10 人规模进攻会在拆完基地前被全歼
+                new BuildingConfig { kind="hall", name="主基地", wood=0, mana=0, hp=1500, size=5.0f, atk=75, atkRange=12, atkCd=1.3f },
                 new BuildingConfig { kind="barracks", name="兵营", wood=50, mana=100, hp=800, size=3.6f, trainUnitIds=new(){"footman","lordknight"}, techIds=new(){"human_atk","human_def"} },
                 new BuildingConfig { kind="archery", name="弓箭场", wood=40, mana=110, hp=700, size=3.2f, trainUnitIds=new(){"archer"} },
                 new BuildingConfig { kind="stable", name="马厩", wood=50, mana=140, hp=800, size=3.6f, trainUnitIds=new(){"knight"} },
                 new BuildingConfig { kind="resource_hub", name="资源收集站", wood=30, mana=80, hp=600, size=3.0f },
-                new BuildingConfig { kind="tower", name="箭塔", wood=20, mana=80, hp=350, size=2.6f, atk=12, atkRange=11, atkCd=1f },
+                new BuildingConfig { kind="tower", name="箭塔", wood=20, mana=80, hp=650, size=2.6f, atk=22, atkRange=11, atkCd=0.9f },
                 new BuildingConfig { kind="house", name="民居", wood=20, mana=70, hp=400, size=3.0f },
                 new BuildingConfig { kind="crypt", name="地穴", wood=50, mana=100, hp=800, size=3.6f, trainUnitIds=new(){"skeleton","deathranger"}, techIds=new(){"undead_atk","undead_def"} },
                 new BuildingConfig { kind="dark_temple", name="诅咒神殿", wood=40, mana=110, hp=700, size=3.2f, trainUnitIds=new(){"darkarcher"} },
