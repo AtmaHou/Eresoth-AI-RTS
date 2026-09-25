@@ -2,6 +2,19 @@
 
 版本号规则：`主版本.功能版本.修订号`。当前版本见顶部最新条目。
 
+## [2.4.0] 2026-09-25
+
+### 新增：Prompt 可独立调试 + Prompt Lab 工具（可调试性改造，不改玩法）
+- **Prompt 外置为文本文件**（`EresothRTS/prompts/`）：`system_prompt.txt`（角色/契约/字段/规则）、`user_template.txt`（user 模板，占位符 `{digest}` `{history}` `{examples}` `{player_text}`）、`examples.txt`（few-shot 示例）。**改文件即热重载**（按修改时间检测，下一条指令生效），不用改代码不用重启游戏；文件缺失时回退内嵌默认（与文件内容保持一致）。配套 `python tools/check_prompt_sync.py` 校验文件与内嵌串一致。
+- **Prompt 内容优化**：删掉与 digest 中 `vocab.aliases` 重复的硬编码口语映射表（旧规则 7），改为一行"优先匹配 aliases"；few-shot 从 user prompt 拆出并标注"仅供格式参考"；结构重排为 角色→契约→军事→经济→规则。
+- **llm_log.jsonl v2**：`system`/`user` 完整 prompt 原文（上限 64KB，旧版截断 4000 字符导致 user prompt 经常看不到）、`content`/`reasoning` 正文与思考分开、`usage`（含 reasoning_tokens）、`prompt_src`（当时生效的 prompt 文件版本）、`ms`/`status`；`response_raw` 只在出错时保留。旧格式日志仍可解析（工具自适应）。
+- **command_log.jsonl 瘦身**：去掉重复的 request/response（llm_log 里有完整现场，按时间戳对上），保留 `text/digest/model/reply/result/exec`。
+- **Prompt Lab**（`AI_RTS/tools/prompt_lab.py` + `prompt_lab.html`，零第三方依赖，Python 标准库）：`python tools/prompt_lab.py` 启动，自动打开 `http://127.0.0.1:8735`。三个页签：①日志查看（llm_log/command_log 列表 + 完整现场，digest 自动格式化）；②Prompt 调试（页面内编辑 prompt 文件保存即生效，选态势来源 + 历史 + 玩家命令试跑，看 content/reasoning/token）；③批跑样例（预置 16 条覆盖军事/经济/编制/侦察/条件/问答，全部运行看 JSON 合法性与 orders/economy 条数，导出 jsonl）。附 `sample_digest.json`（真实态势改造的调试样例）与 `test_cases.json`。
+- **本地调试服务器代理 LLM 调用**：浏览器直连有 CORS 限制且会暴露 api_key，由服务器代发（参数兼容逻辑与游戏内一致：Kimi 系 temperature=1 且无 response_format，思考模型放宽超时）；"模型设置"页读写 `EresothRTS/llm_config.json`，游戏与调试共用一份配置。
+
+### 修复
+- **digest 是非法 JSON（严重，全量历史日志受影响）**：`StateDigestBuilder` 拼 `vocab` 时 `units` 与 `techs` 数组后漏逗号（`]"techs"` / `]"buildable"`），发给模型的态势摘要一直是不合法 JSON（模型容错没暴露，但下游任何 JSON 解析都会失败）。已补逗号。
+
 ## [2.3.0] 2026-09-13
 
 ### 修复

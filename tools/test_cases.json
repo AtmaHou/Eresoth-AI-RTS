@@ -1,0 +1,18 @@
+[
+  {"name": "简单移动", "player_text": "一军团去中场", "digest": "@sample", "history": "", "note": "orders 1条：army_1 move/attack_move → center_field"},
+  {"name": "条件撤退", "player_text": "二军团去东矿，遇到主力就撤", "digest": "@sample", "history": "", "note": "attack_move enemy_east_mana + conditions(enemy_count_near → retreat)"},
+  {"name": "血量触发", "player_text": "二军团谨慎推进敌方前线，伤亡过半就撤退", "digest": "@sample", "history": "", "note": "stance=cautious + conditions(ally_health_ratio < 0.5)"},
+  {"name": "全军展开", "player_text": "全军撤退", "digest": "@sample", "history": "", "note": "orders 应有两条：army_1 和 army_2 各一条 retreat"},
+  {"name": "集火英雄", "player_text": "全军集火敌方英雄", "digest": "@sample", "history": "", "note": "focus_fire + target_ref=hero"},
+  {"name": "侦察", "player_text": "派个骑兵去侦查一圈", "digest": "@sample", "history": "", "note": "scout + unit_filter=cavalry"},
+  {"name": "兵种筛选骚扰", "player_text": "一军团的骑兵去骚扰敌方西矿", "digest": "@sample", "history": "", "note": "attack_move enemy_west_mana + unit_filter=cavalry"},
+  {"name": "编制一半", "player_text": "一军团一半的兵编入二队", "digest": "@sample", "history": "", "note": "reorganize force_id=army_2 source_id=army_1 ratio=0.5"},
+  {"name": "编制筛选", "player_text": "所有的骑兵编入二队", "digest": "@sample", "history": "", "note": "reorganize source_id=__all__ unit_filter=cavalry"},
+  {"name": "训练+科研", "player_text": "造4个弓箭手，攻击科技优先", "digest": "@sample", "history": "", "note": "train archer×4 + research human_atk；别名'弓箭手'→'长弓手/archer'"},
+  {"name": "分矿建造", "player_text": "拉两个农夫去开个分矿", "digest": "@sample", "history": "", "note": "build resource_hub worker_count=2"},
+  {"name": "顺序建造", "player_text": "依次造2个兵营和3个箭塔", "digest": "@sample", "history": "", "note": "两条 build，同 batch 递增 sequence"},
+  {"name": "工人重排", "player_text": "所有农民按比分配采资源", "digest": "@sample", "history": "", "note": "assign_workers both + worker_count=-1"},
+  {"name": "采魔法矿", "player_text": "工人去采魔法矿", "digest": "@sample", "history": "", "note": "assign_workers mana"},
+  {"name": "修理", "player_text": "农民修理受损建筑", "digest": "@sample", "history": "", "note": "repair（target_id 可缺省）"},
+  {"name": "闲聊问答", "player_text": "现在还有多少木头？", "digest": "@sample", "history": "", "note": "orders/economy 留空，player_reply 回答 wood=260"}
+]

@@ -31,9 +31,12 @@ namespace Eresoth
         bool configLoaded;
         public bool Available { get; private set; }
         public string UnavailableReason { get; private set; }
-        /// <summary>最近一次解析调用的请求体/原始响应（command_log.jsonl 落盘用，含完整 prompt 现场）。</summary>
-        public string LastRequestBody { get; private set; }
-        public string LastResponseBody { get; private set; }
+        /// <summary>最近一次解析调用的完整现场（llm_log 落盘与指挥台展示用）：prompt 原文 + 模型正文/推理 + token 用量。</summary>
+        public string LastSystemPrompt { get; private set; }
+        public string LastUserPrompt { get; private set; }
+        public string LastContent { get; private set; }
+        public string LastReasoning { get; private set; }
+        public (int prompt, int completion, int reasoning) LastUsage { get; private set; }
         /// <summary>是否存在运行时保存的本机配置（"清除本机配置"按钮用）。</summary>
         public bool HasLocalConfig => File.Exists(LocalConfigPath);
 
@@ -111,7 +114,10 @@ namespace Eresoth
         {
             if (!configLoaded) TryLoadConfig();
             if (!Available) { onError?.Invoke(UnavailableReason, null); return; }
-            StartCoroutine(Request(PromptBuilder.SystemPrompt(), PromptBuilder.UserPrompt(playerText, digestJson, historyText), onJson, onError));
+            string system = PromptBuilder.SystemPrompt();
+            string user = PromptBuilder.UserPrompt(playerText, digestJson, historyText);
+            LastSystemPrompt = system; LastUserPrompt = user;
+            StartCoroutine(Request(system, user, onJson, onError));
         }
 
         IEnumerator Request(string system, string user, Action<string> onJson, Action<string, string> onError)
@@ -133,30 +139,37 @@ namespace Eresoth
             req.timeout = thinking ? 60 : (int)TimeoutSeconds;
 
             float t0 = Time.realtimeSinceStartup;
-            LastRequestBody = body;
             yield return req.SendWebRequest();
             int elapsed = Mathf.RoundToInt((Time.realtimeSinceStartup - t0) * 1000f);
             string url = cfg.base_url.TrimEnd('/') + "/chat/completions";
             string respText = req.downloadHandler?.text;
-            LastResponseBody = respText;
+            string promptSrc = PromptBuilder.SourceStamp();
 
             if (req.result != UnityWebRequest.Result.Success)
             {
                 string errMsg = $"API 请求失败：{req.error}{FmtServerError(respText)}";
-                LlmLogger.Log("parse", cfg.model, url, body, req.responseCode, respText, elapsed, errMsg);
+                LlmLogger.Log("parse", cfg.model, url, promptSrc, system, user, req.responseCode, elapsed,
+                    null, null, (0, 0, 0), errMsg, respText);
                 onError?.Invoke(errMsg, Truncate(respText));
                 yield break;
             }
 
-            string content = ExtractContent(respText);
+            var parsed = ParseChat(respText);
+            string content = FirstChoice(parsed)?.message?.content;
+            string reasoning = FirstChoice(parsed)?.message?.reasoning_content;
+            var usage = ExtractUsage(parsed);
+            LastContent = content; LastReasoning = reasoning; LastUsage = usage;
+
             if (content == null || string.IsNullOrWhiteSpace(content))
             {
                 string errMsg = "API 返回格式异常（思考模型可能因 max_tokens 截断导致 content 为空）";
-                LlmLogger.Log("parse", cfg.model, url, body, req.responseCode, respText, elapsed, errMsg);
+                LlmLogger.Log("parse", cfg.model, url, promptSrc, system, user, req.responseCode, elapsed,
+                    content, reasoning, usage, errMsg, respText);
                 onError?.Invoke(errMsg, Truncate(respText));
                 yield break;
             }
-            LlmLogger.Log("parse", cfg.model, url, body, req.responseCode, respText, elapsed, null);
+            LlmLogger.Log("parse", cfg.model, url, promptSrc, system, user, req.responseCode, elapsed,
+                content, reasoning, usage, null, null);
             onJson?.Invoke(content);
         }
 
@@ -257,18 +270,24 @@ namespace Eresoth
                 yield return req.SendWebRequest();
                 int ms = Mathf.RoundToInt((Time.realtimeSinceStartup - t0) * 1000f);
                 string respText = req.downloadHandler?.text;
+                string url = baseUrl + "/chat/completions";
+                const string ping = "reply with the single word: pong";
 
                 if (req.result != UnityWebRequest.Result.Success)
                 {
                     string errMsg = $"连接失败（{ms}ms）：{req.error}{FmtServerError(respText)}";
-                    LlmLogger.Log("test", model, baseUrl + "/chat/completions", body, req.responseCode, respText, ms, errMsg);
+                    LlmLogger.Log("test", model, url, null, null, ping, req.responseCode, ms,
+                        null, null, (0, 0, 0), errMsg, respText);
                     onDone?.Invoke(false, errMsg);
                     yield break;
                 }
-                string content = ExtractContent(respText);
+                var parsed = ParseChat(respText);
+                string content = FirstChoice(parsed)?.message?.content;
+                string reasoning = FirstChoice(parsed)?.message?.reasoning_content;
                 if (content != null && !string.IsNullOrWhiteSpace(content))
                 {
-                    LlmLogger.Log("test", model, baseUrl + "/chat/completions", body, req.responseCode, respText, ms, null);
+                    LlmLogger.Log("test", model, url, null, null, ping, req.responseCode, ms,
+                        content, reasoning, ExtractUsage(parsed), null, null);
                     onDone?.Invoke(true, $"连通正常 · {model} · {ms}ms");
                     yield break;
                 }
@@ -278,36 +297,41 @@ namespace Eresoth
                     continue;
                 }
                 string err = $"已连通但返回异常（{ms}ms）{FmtServerError(respText)}";
-                LlmLogger.Log("test", model, baseUrl + "/chat/completions", body, req.responseCode, respText, ms, err);
+                LlmLogger.Log("test", model, url, null, null, ping, req.responseCode, ms,
+                    content, reasoning, ExtractUsage(parsed), err, respText);
                 onDone?.Invoke(false, err);
                 yield break;
             }
         }
 
+        /// <summary>解析 OpenAI 响应体（失败返回 null，不抛异常）。</summary>
+        static ChatResponse ParseChat(string json)
+        {
+            try { return JsonUtility.FromJson<ChatResponse>(json); }
+            catch { return null; }
+        }
+
+        static Choice FirstChoice(ChatResponse resp)
+            => resp?.choices != null && resp.choices.Count > 0 ? resp.choices[0] : null;
+
+        /// <summary>token 用量（含推理 token 细分）；未上报时全 0。</summary>
+        static (int prompt, int completion, int reasoning) ExtractUsage(ChatResponse resp)
+        {
+            var u = resp?.usage;
+            if (u == null) return (0, 0, 0);
+            return (u.prompt_tokens, u.completion_tokens, u.completion_tokens_details?.reasoning_tokens ?? 0);
+        }
+
         /// <summary>取 choices[0].finish_reason（如 length/stop），用于识别 max_tokens 截断。</summary>
         static string FinishReason(string json)
         {
-            try
-            {
-                var resp = JsonUtility.FromJson<ChatResponse>(json);
-                if (resp?.choices != null && resp.choices.Count > 0)
-                    return resp.choices[0].finish_reason;
-            }
-            catch { }
-            return null;
+            return FirstChoice(ParseChat(json))?.finish_reason;
         }
 
         /// <summary>从 OpenAI 响应中取 choices[0].message.content（最小解析，不引第三方库）。</summary>
         static string ExtractContent(string json)
         {
-            try
-            {
-                var resp = JsonUtility.FromJson<ChatResponse>(json);
-                if (resp?.choices != null && resp.choices.Count > 0)
-                    return resp.choices[0].message.content;
-            }
-            catch { }
-            return null;
+            return FirstChoice(ParseChat(json))?.message?.content;
         }
 
         /// <summary>剥离模型可能包裹的 ```json 代码围栏：没开 response_format 的模型（如 Kimi）常这样输出。</summary>
@@ -325,9 +349,17 @@ namespace Eresoth
             return s.Trim();
         }
 
-        [Serializable] class ChatResponse { public System.Collections.Generic.List<Choice> choices = null; }
+        [Serializable] class ChatResponse { public System.Collections.Generic.List<Choice> choices = null; public Usage usage = null; }
         [Serializable] class Choice { public Message message = null; public string finish_reason = null; }
-        [Serializable] class Message { public string content = null; }
+        [Serializable] class Message { public string content = null; public string reasoning_content = null; }
+        [Serializable] class Usage
+        {
+            public int prompt_tokens;
+            public int completion_tokens;
+            public int total_tokens;
+            public UsageDetail completion_tokens_details = null;
+        }
+        [Serializable] class UsageDetail { public int reasoning_tokens; }
 
         static string JsonString(string s)
             => "\"" + s.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "") + "\"";

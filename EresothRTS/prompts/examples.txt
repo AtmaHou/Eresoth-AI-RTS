@@ -1,0 +1,17 @@
+玩家："二军团去东矿，遇到主力就撤"
+→ orders:[{"force_id":"army_2","action":"attack_move","target_id":"enemy_east_mana","conditions":[{"when":{"metric":"enemy_count_near","subject":"force","op":">=","value":8},"then":{"action":"retreat","target_id":"own_retreat_point"}}]}]
+
+玩家："补四个弓箭手，攻击科技优先"
+→ economy:[{"action":"train","target_id":"archer","count":4},{"action":"research","target_id":"human_atk"}]
+
+玩家："拉两个农夫去开个分矿"
+→ economy:[{"action":"build","target_id":"resource_hub","worker_count":2}]
+
+玩家："派个骑兵去侦查一圈"
+→ orders:[{"force_id":"army_1","action":"scout","unit_filter":"cavalry"}]
+
+玩家："一军团一半的兵编入二队"
+→ orders:[{"force_id":"army_2","action":"reorganize","source_id":"army_1","ratio":0.5}]
+
+玩家："所有的骑兵编入二队"
+→ orders:[{"force_id":"army_2","action":"reorganize","source_id":"__all__","unit_filter":"cavalry"}]

@@ -1,0 +1,225 @@
+{
+  "t": 120,
+  "resources": {
+    "wood": 260,
+    "mana": 420,
+    "pop": "22/40"
+  },
+  "forces": [
+    {
+      "id": "army_1",
+      "name": "一军团",
+      "at": "own_main_base",
+      "comp": {
+        "infantry": 6,
+        "ranged": 4
+      },
+      "hp": 1.0,
+      "order": "待命"
+    },
+    {
+      "id": "army_2",
+      "name": "二军团",
+      "at": "center_field",
+      "comp": {
+        "cavalry": 5
+      },
+      "hp": 0.8,
+      "order": "待命"
+    }
+  ],
+  "buildings": {
+    "hall": 1,
+    "barracks": 1,
+    "archery": 1,
+    "house": 2
+  },
+  "enemy_intel": {
+    "fog": true,
+    "visible_count": 3,
+    "frontline": "enemy_frontline"
+  },
+  "recent_events": [
+    "侦察兵报告：敌方主基地位于 enemy_main_base"
+  ],
+  "vocab": {
+    "actions": [
+      "move",
+      "attack",
+      "attack_move",
+      "defend",
+      "retreat",
+      "focus_fire",
+      "regroup",
+      "hold",
+      "scout",
+      "reorganize"
+    ],
+    "economy_actions": [
+      "train",
+      "research",
+      "build",
+      "assign_workers",
+      "repair"
+    ],
+    "metrics": [
+      "enemy_count_near",
+      "ally_health_ratio",
+      "resource",
+      "building_hp_ratio",
+      "enemy_visible",
+      "time_elapsed"
+    ],
+    "targets": [
+      "own_main_base",
+      "enemy_main_base",
+      "center_field",
+      "own_retreat_point",
+      "enemy_frontline",
+      "center_mana",
+      "own_east_mana",
+      "own_west_mana",
+      "enemy_east_mana",
+      "enemy_west_mana",
+      "own_east_wood",
+      "own_west_wood",
+      "enemy_east_wood",
+      "enemy_west_wood"
+    ],
+    "forces_list": [
+      "army_1:一军团",
+      "army_2:二军团"
+    ],
+    "target_refs": [
+      "hero",
+      "kind:infantry",
+      "kind:ranged",
+      "kind:cavalry",
+      "bld:主基地:enemy",
+      "bld:兵营:enemy",
+      "bld:地穴:enemy",
+      "bld:基地:enemy",
+      "bld:塔:enemy",
+      "bld:弓箭场:enemy",
+      "bld:房子:enemy",
+      "bld:收集站:enemy",
+      "bld:民居:enemy",
+      "bld:神殿:enemy",
+      "bld:箭塔:enemy",
+      "bld:资源收集站:enemy",
+      "bld:马厩:enemy",
+      "bld:主基地:own",
+      "bld:兵营:own",
+      "bld:地穴:own",
+      "bld:基地:own",
+      "bld:塔:own",
+      "bld:弓箭场:own",
+      "bld:房子:own",
+      "bld:收集站:own",
+      "bld:民居:own",
+      "bld:神殿:own",
+      "bld:箭塔:own",
+      "bld:资源收集站:own",
+      "bld:马厩:own"
+    ],
+    "units": [
+      {
+        "id": "footman",
+        "name": "步兵",
+        "kind": "infantry",
+        "cost": "10木+50矿",
+        "aliases": [
+          "步兵"
+        ]
+      },
+      {
+        "id": "lordknight",
+        "name": "骑士团长",
+        "kind": "cavalry",
+        "cost": "100木+300矿",
+        "aliases": [
+          "骑士团长",
+          "英雄"
+        ]
+      },
+      {
+        "id": "archer",
+        "name": "长弓手",
+        "kind": "ranged",
+        "cost": "10木+50矿",
+        "aliases": [
+          "长弓手",
+          "弓箭手",
+          "弓手",
+          "弓兵"
+        ]
+      },
+      {
+        "id": "knight",
+        "name": "骑士",
+        "kind": "cavalry",
+        "cost": "30木+90矿",
+        "aliases": [
+          "骑士"
+        ]
+      }
+    ],
+    "techs": [
+      {
+        "id": "human_atk",
+        "name": "利刃淬炼"
+      },
+      {
+        "id": "human_def",
+        "name": "坚壁工事"
+      }
+    ],
+    "buildable": [
+      {
+        "kind": "barracks",
+        "name": "兵营",
+        "aliases": [
+          "兵营"
+        ]
+      },
+      {
+        "kind": "archery",
+        "name": "弓箭场",
+        "aliases": [
+          "弓箭场"
+        ]
+      },
+      {
+        "kind": "stable",
+        "name": "马厩",
+        "aliases": [
+          "马厩"
+        ]
+      },
+      {
+        "kind": "resource_hub",
+        "name": "资源收集站",
+        "aliases": [
+          "资源收集站",
+          "收集站"
+        ]
+      },
+      {
+        "kind": "tower",
+        "name": "箭塔",
+        "aliases": [
+          "箭塔",
+          "塔"
+        ]
+      },
+      {
+        "kind": "house",
+        "name": "民居",
+        "aliases": [
+          "民居",
+          "房子"
+        ]
+      }
+    ]
+  }
+}

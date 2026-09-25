@@ -129,7 +129,7 @@ namespace Eresoth
             if (req.clarification_needed && !string.IsNullOrEmpty(req.question))
             {
                 Add("参谋", req.question, json, text);
-                Log(text, digest, json, fromCache ? "cache_hit_clarification" : "clarification");
+                Log(text, digest, json, req.question, fromCache ? "cache_hit_clarification" : "clarification");
                 PushTurn(text, req.question);
                 return;
             }
@@ -140,7 +140,7 @@ namespace Eresoth
                 : executed > 0 ? "收到，已下达。" : "没有可执行的指令。";
             if (fromCache) reply += "［缓存命中］";
             Add("参谋", reply, json, text, json);
-            Log(text, digest, json,
+            Log(text, digest, json, reply,
                 fromCache ? "cache_hit" : executed > 0 ? "executed" : "no-op", execSummary);
             PushTurn(text, reply);
         }
@@ -152,12 +152,12 @@ namespace Eresoth
             if (req == null)
             {
                 Add("参谋", $"没听懂（{reason}）。试试：\"一军团防守家门口\"、\"二军团去打东矿\"、\"造4个弓箭手\"。", raw, text);
-                Log(text, digest, null, "fallback_failed: " + reason);
+                Log(text, digest, null, "没听懂", "fallback_failed: " + reason);
                 return;
             }
             int executed = Execute(req, out string fbSummary);
             Add("参谋", (req.player_reply ?? "收到。") + "［离线兜底］", raw, text, JsonUtility.ToJson(req));
-            Log(text, digest, null, $"fallback_executed({executed}): {reason}", fbSummary);
+            Log(text, digest, null, req.player_reply, $"fallback_executed({executed}): {reason}", fbSummary);
             PushTurn(text, req.player_reply ?? "");
         }
 
@@ -211,20 +211,18 @@ namespace Eresoth
             scroll.y = float.MaxValue;   // 滚到底
         }
 
-        void Log(string text, string digest, string modelJson, string result, string exec = null, bool cacheHit = false)
+        /// <summary>command_log.jsonl 落盘：玩家原话 + 当时态势 digest + 模型输出 + 参谋回复 + 执行结果。
+        /// 发给 LLM 的完整 prompt 与 API 原始响应在 llm_log.jsonl（v2 起不再重复存，按时间戳可对上）；
+        /// 缓存命中/fallback 没有模型调用，model 字段写 null。</summary>
+        void Log(string text, string digest, string modelJson, string reply, string result, string exec = null)
         {
             try
             {
-                // 完整现场：墙上时间 + 发给 LLM 的请求体（含 prompt）+ API 原始响应；均为最近一次调用。
-                // 缓存命中没有本次请求，写 null 以免带上一次调用的现场误导复盘
-                string reqBody = !cacheHit && LlmClient.I != null ? LlmClient.I.LastRequestBody : null;
-                string respBody = !cacheHit && LlmClient.I != null ? LlmClient.I.LastResponseBody : null;
                 string line = "{\"wall\":" + J(System.DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"))
                     + ",\"t\":" + Time.time.ToString("0")
                     + ",\"text\":" + J(text) + ",\"digest\":" + (digest ?? "null")
-                    + ",\"request\":" + (reqBody != null ? J(Truncate(reqBody, 4000)) : "null")
-                    + ",\"response\":" + (respBody != null ? J(Truncate(respBody, 4000)) : "null")
-                    + ",\"model\":" + (modelJson != null ? J(Truncate(modelJson, 4000)) : "null")
+                    + ",\"model\":" + (modelJson != null ? J(Truncate(modelJson, 8000)) : "null")
+                    + ",\"reply\":" + J(reply)
                     + ",\"result\":" + J(result)
                     + ",\"exec\":" + (exec != null ? J(exec) : "null") + "}";
                 File.AppendAllText(logPath, line + "\n");

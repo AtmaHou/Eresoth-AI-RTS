@@ -33,8 +33,9 @@ Main.unity
              LlmClient.cs            OpenAI 兼容客户端（coroutine）；配置优先级：persistentDataPath 本机文件（运行时填写）→ 项目根 llm_config.json（gitignore）→ 走兜底
              LocalFallbackParser.cs  API 失败时的关键词规则解析（词表动态来自注册表，只覆盖高频意图）
              DebugCommandRunner.cs   LLM/兜底共用的请求 DTO（CommandRequest/OrderDto/ConditionDto）+ DTO→Order 映射校验（Map）
-             PromptBuilder.cs        系统/用户 Prompt 拼装（词表随注册表自动更新）
+             PromptBuilder.cs        系统/用户 Prompt 拼装；内容外置在 EresothRTS/prompts/*.txt（热重载，可独立调试），缺失时回退内嵌默认
              StateDigestBuilder.cs   态势摘要 JSON（军团/资源/战况，喂给 LLM）
+             LlmLogger.cs            llm_log.jsonl v2 落盘：system/user 完整 prompt、content/reasoning、usage、错误现场
              SemanticMap.cs          语义点注册表："东矿/家门口"等别名 → 世界坐标（TryGet）
              SemanticMapRegistrar.cs 开局注册本局语义点
              Order.cs                军令模型：OrderAction 白名单 + Order 五槽位 + OrderCondition 触发器
@@ -100,6 +101,8 @@ RTSConfig 资产（Inspector 可调）→ RuntimeConfig.Initialize() → 静态�
 | 单位/建筑外观、动画挂点 | `Models.Units.cs` / `Models.cs`（`BodyRig`） |
 | 特效 | `UnitVfx.cs` |
 | 文字指挥链路 / LLM 接入 | `Command/` 全目录，入口 `CommandConsole.Send`、`LlmClient.Parse` |
+| 调整发给模型的 Prompt | `EresothRTS/prompts/*.txt`（system_prompt/user_template/examples，改文件热重载，不动代码） |
+| 查看/调试 LLM 请求响应、批跑样例 | `AI_RTS/tools/prompt_lab.py`（本地调试页，零依赖） |
 | 新触发器指标 | `Order.cs`（ConditionMetric）+ `ConditionEvaluator.cs` |
 | 新语义点（"东矿"类别名） | `SemanticMapRegistrar.cs` |
 | 迷雾表现与感知口径 | `FogOfWarManager.cs` |
@@ -115,4 +118,4 @@ RTSConfig 资产（Inspector 可调）→ RuntimeConfig.Initialize() → 静态�
 - 全局列表由 `Game` 持有，实体销毁时各自 `OnDestroy()` 移除自己。
 - 所有实体贴地走 `Game.TerrainHeight(x, z)`，新增生成逻辑不要假设 y=0。
 - `Game.Toast()` 仅玩家阵营侧可调用。
-- 对局日志在 `EresothRTS/command_log.jsonl`（玩家原话/模型输出/执行结果），是评测与蒸馏数据源，改动指挥链路时保持字段稳定。
+- 对局日志在 `EresothRTS/command_log.jsonl`（玩家原话/态势 digest/模型输出/参谋回复/执行结果），是评测与蒸馏数据源，改动指挥链路时保持字段稳定；发给 LLM 的完整 prompt 与返回在 `llm_log.jsonl`（v2：system/user/content/reasoning/usage），两者按时间戳关联，查看用 `tools/prompt_lab.py`。

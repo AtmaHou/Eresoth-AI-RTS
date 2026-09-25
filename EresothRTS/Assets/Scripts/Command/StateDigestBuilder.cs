@@ -159,6 +159,7 @@ namespace Eresoth
                 }
             }
             sb.Append(']');
+            sb.Append(',');   // 与下一个 vocab 字段之间的分隔（缺失会产出非法 JSON）
         }
 
         static void AppendTechs(StringBuilder sb, Team team)
@@ -175,6 +176,7 @@ namespace Eresoth
                 sb.Append("{\"id\":\"").Append(kv.Key).Append("\",\"name\":\"").Append(kv.Value.name).Append("\"}");
             }
             sb.Append(']');
+            sb.Append(',');   // 与下一个 vocab 字段之间的分隔（缺失会产出非法 JSON）
         }
 
         static void AppendBuildings(StringBuilder sb, Team team)
