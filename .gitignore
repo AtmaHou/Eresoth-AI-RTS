@@ -63,6 +63,8 @@ EresothRTS/command_cache.json
 EresothRTS/favorite_commands.json
 # LLM 连接日志（请求/响应/错误现场），含密钥配置的请求头不落盘、但请求体可能含提示词，不入库
 EresothRTS/llm_log.jsonl
+# LLM 调用的人类可读副本（指令 + INPUT/OUTPUT 全文，编辑器直接打开即可看），运行数据不入库
+EresothRTS/llm_io.log
 
 # ===================== 操作系统垃圾文件 =====================
 .DS_Store

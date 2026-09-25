@@ -38,17 +38,21 @@ namespace Eresoth
             // --- 军事军令：模糊解析军团（"军团一/1队/army_1"均可） ---
             if (ForceManager.I == null) return Reject(o, "军团系统未就绪");
             var force = ForceManager.I.Resolve(o.forceId);
-            if (force == null && o.action == OrderAction.Scout)
+            if (force == null && (string.IsNullOrEmpty(o.forceId) || o.action == OrderAction.Scout))
             {
-                // 侦察不绑定既有编队：标准开局没按 F10 也能侦查——先自动编队，侦察兵还会跨军团抽调
+                // 兜底解析器在没有军团时会把 force_id 留空；侦察也允许不绑定既有编队。
+                // 标准开局没按 F10 也能直接下令：先自动编队，再退而取任一非空军团
                 ForceManager.I.AutoForm(Game.I.playerTeam);
                 force = ForceManager.I.Resolve(o.forceId);
+                force ??= ForceManager.I.OfTeam(Game.I.playerTeam).Find(x => x.AliveCount > 0);
             }
             if (force == null)
-                return Reject(o, $"军团不存在：{o.forceId}（可用：{ListForces()}；先按 F10 或说\"全军集结\"编组）");
+                return Reject(o, string.IsNullOrEmpty(o.forceId)
+                    ? "没有可指挥的作战单位（先训练士兵；之后直接下令即可，无需手动编组）"
+                    : $"军团不存在：{o.forceId}（可用：{ListForces()}；先按 F10 或说\"全军集结\"编组）");
             if (force.AliveCount == 0)
             {
-                if (o.action == OrderAction.Scout)
+                if (o.action == OrderAction.Scout || string.IsNullOrEmpty(o.forceId))
                 {
                     // 新训练的兵可能还没编组：补一次自动编队，再退而求其次挂到任一非空军团
                     ForceManager.I.AutoForm(Game.I.playerTeam);

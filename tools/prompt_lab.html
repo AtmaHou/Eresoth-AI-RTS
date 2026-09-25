@@ -153,8 +153,14 @@ const esc = s => String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").repl
 async function api(path, method, body) {
   const opt = { method: method || "GET" };
   if (body !== undefined) { opt.headers = {"Content-Type":"application/json"}; opt.body = JSON.stringify(body); }
-  const r = await fetch(path, opt);
-  return r.json();
+  let r;
+  try { r = await fetch(path, opt); }
+  catch (e) { throw new Error("连接服务器失败（prompt_lab.py 是否在运行？）"); }
+  let j;
+  try { j = await r.json(); }
+  catch (e) { throw new Error(`服务器返回异常（HTTP ${r.status}）`); }
+  if (!r.ok) throw new Error(j.error || `HTTP ${r.status}`);
+  return j;
 }
 function toast(msg) { const t = $("toast"); t.textContent = msg; t.style.display = "block"; setTimeout(()=>t.style.display="none", 2200); }
 function pretty(s) { try { return JSON.stringify(typeof s === "string" ? JSON.parse(s) : s, null, 2); } catch { return s; } }
@@ -176,11 +182,15 @@ function switchTab(name) {
 
 // ---------------- 模型设置 ----------------
 async function loadCfg() {
-  const c = await api("/api/config");
-  $("cfg-info").innerHTML = c.config_exists
-    ? `模型 <b>${esc(c.model)}</b> · ${esc(c.base_url)} · key ${c.has_key ? '<span class="ok">已配置 '+esc(c.key_tail)+'</span>' : '<span class="bad">未配置</span>'}${c.thinking ? ' · thinking' : ''}`
-    : `<span class="bad">llm_config.json 不存在</span>`;
-  cfgCache = c;
+  try {
+    const c = await api("/api/config");
+    $("cfg-info").innerHTML = c.config_exists
+      ? `模型 <b>${esc(c.model)}</b> · ${esc(c.base_url)} · key ${c.has_key ? '<span class="ok">已配置 '+esc(c.key_tail)+'</span>' : '<span class="bad">未配置</span>'}${c.thinking ? ' · thinking' : ''}`
+      : `<span class="bad">llm_config.json 不存在</span>`;
+    cfgCache = c;
+  } catch (e) {
+    $("cfg-info").innerHTML = `<span class="bad">配置加载失败：${esc(e.message)}</span>`;
+  }
 }
 let cfgCache = null;
 function openCfg() {
@@ -192,15 +202,19 @@ function openCfg() {
 }
 function closeCfg() { $("modal-mask").style.display = "none"; }
 async function saveCfg() {
-  const r = await api("/api/config", "PUT", { base_url: $("cfg-base").value.trim(), model: $("cfg-model").value.trim(), api_key: $("cfg-key").value.trim(), thinking: $("cfg-thinking").checked });
-  if (r.ok) { toast("配置已保存"); closeCfg(); loadCfg(); } else toast("保存失败：" + (r.error||""));
+  try {
+    const r = await api("/api/config", "PUT", { base_url: $("cfg-base").value.trim(), model: $("cfg-model").value.trim(), api_key: $("cfg-key").value.trim(), thinking: $("cfg-thinking").checked });
+    if (r.ok) { toast("配置已保存"); closeCfg(); loadCfg(); } else toast("保存失败：" + (r.error||""));
+  } catch (e) { toast("保存失败：" + e.message); }
 }
 
 // ---------------- 日志查看 ----------------
 let logsLoaded = false, logEntries = [], logSel = -1;
 async function loadLogs() {
   const which = $("log-which").value, n = $("log-n").value;
-  const r = await api(`/api/logs?which=${which}&n=${n}`);
+  let r;
+  try { r = await api(`/api/logs?which=${which}&n=${n}`); }
+  catch (e) { $("log-list").innerHTML = `<tr><td colspan="4" class="bad">${esc(e.message)}</td></tr>`; return; }
   logEntries = r.lines || []; logSel = -1; logsLoaded = true;
   $("log-path").textContent = r.missing ? "文件不存在：" + r.path : r.path;
   const tb = $("log-list"); tb.innerHTML = "";
@@ -290,8 +304,10 @@ async function loadPrompts() {
   promptsLoaded = true;
 }
 async function savePrompt(name) {
-  const r = await api("/api/prompts/" + name, "PUT", { content: $("pe-" + name).value });
-  if (r.ok) { toast(name + " 已保存 " + r.mtime); } else toast("保存失败：" + (r.error||""));
+  try {
+    const r = await api("/api/prompts/" + name, "PUT", { content: $("pe-" + name).value });
+    toast(name + " 已保存 " + r.mtime);
+  } catch (e) { toast("保存失败：" + e.message); }
 }
 async function saveAllPrompts() { for (const n of PROMPT_FILES) await savePrompt(n); }
 
@@ -299,14 +315,16 @@ async function onDigestSrc() {
   const src = $("digest-src").value, ta = $("digest-text");
   if (src === "custom") { ta.readOnly = false; if (!ta.value) ta.value = ""; return; }
   ta.readOnly = true; ta.value = "加载中…";
-  if (src === "@sample") {
-    const r = await api("/api/sample_digest");
-    ta.value = r.digest ? pretty(r.digest) : ("加载失败：" + (r.error||""));
-  } else {
-    const r = await api("/api/logs?which=command&n=500");
-    const hit = (r.lines||[]).slice().reverse().find(e => e.digest);
-    ta.value = hit ? pretty(hit.digest) : "command_log 里没有可用 digest";
-  }
+  try {
+    if (src === "@sample") {
+      const r = await api("/api/sample_digest");
+      ta.value = r.digest ? pretty(r.digest) : ("加载失败：" + (r.error||""));
+    } else {
+      const r = await api("/api/logs?which=command&n=500");
+      const hit = (r.lines||[]).slice().reverse().find(e => e.digest);
+      ta.value = hit ? pretty(hit.digest) : "command_log 里没有可用 digest";
+    }
+  } catch (e) { ta.value = "加载失败：" + e.message; }
 }
 function digestPayload() { return $("digest-src").value === "custom" ? $("digest-text").value : $("digest-src").value; }
 
@@ -314,12 +332,23 @@ let lastRun = null;
 async function runOnce() {
   const text = $("player-text").value.trim();
   if (!text) { toast("先输入玩家命令"); return; }
-  $("btn-run").disabled = true; $("run-result").innerHTML = '<span class="dim">调用中…</span>';
+  $("btn-run").disabled = true;
+  const box = $("run-result");
+  const t0 = Date.now();
+  box.innerHTML = '<span class="dim">调用中…</span>';
+  const timer = setInterval(() => { if (box.dataset.pending) box.querySelector(".dim").textContent = `调用中…（已等待 ${((Date.now()-t0)/1000).toFixed(0)}s）`; }, 1000);
+  box.dataset.pending = "1";
   try {
     const r = await api("/api/run", "POST", { player_text: text, digest: digestPayload(), history: $("history-text").value });
     lastRun = { name: "", player_text: text, digest: digestPayload(), history: $("history-text").value, note: "" };
-    renderRunResult($("run-result"), r, true);
-  } finally { $("btn-run").disabled = false; }
+    renderRunResult(box, r, true);
+  } catch (e) {
+    box.innerHTML = `<pre style="border-color:#7a3535"><span class="bad">✗ ${esc(e.message)}</span></pre>`;
+  } finally {
+    delete box.dataset.pending;
+    clearInterval(timer);
+    $("btn-run").disabled = false;
+  }
 }
 function renderRunResult(box, r, showSave) {
   if (!r.ok && !r.content) {
@@ -357,8 +386,10 @@ async function saveAsCase() {
 // ---------------- 批跑样例 ----------------
 let casesLoaded = false, cases = [], batchResults = [];
 async function loadCases() {
-  const r = await api("/api/cases");
-  cases = r.cases || []; casesLoaded = true; renderCases();
+  try {
+    const r = await api("/api/cases");
+    cases = r.cases || []; casesLoaded = true; renderCases();
+  } catch (e) { toast("样例加载失败：" + e.message); }
 }
 function renderCases() {
   const tb = $("case-list"); tb.innerHTML = "";
@@ -377,7 +408,12 @@ function renderCases() {
   });
 }
 function addCase() { cases.push({ name: "新样例", player_text: "", digest: "@sample", history: "", note: "" }); renderCases(); }
-async function saveCases() { const r = await api("/api/cases", "PUT", { cases }); toast(r.ok ? `已保存 ${r.count} 条样例` : "保存失败：" + (r.error||"")); }
+async function saveCases() {
+  try {
+    const r = await api("/api/cases", "PUT", { cases });
+    toast(r.ok ? `已保存 ${r.count} 条样例` : "保存失败：" + (r.error||""));
+  } catch (e) { toast("保存失败：" + e.message); }
+}
 
 async function runOneCase(i, btn) {
   const c = cases[i];
@@ -395,11 +431,14 @@ async function runBatch() {
   if (!cases.length) { toast("没有样例"); return; }
   $("btn-batch").disabled = true; batchResults = [];
   const box = $("batch-results"); box.innerHTML = "";
-  for (let i = 0; i < cases.length; i++) {
-    $("batch-progress").textContent = `运行中 ${i+1}/${cases.length}：${cases[i].name}`;
-    const r = await runOneCase(i, null);
-    batchResults.push(r);
-    const s = summarize(r);
+  try {
+    for (let i = 0; i < cases.length; i++) {
+      $("batch-progress").textContent = `运行中 ${i+1}/${cases.length}：${cases[i].name}（单条约 5~20s，请稍候）`;
+      let r;
+      try { r = await runOneCase(i, null); }
+      catch (e) { r = { ok: false, error: e.message || String(e), ms: 0 }; }
+      batchResults.push(r);
+      const s = summarize(r);
     const card = document.createElement("div");
     card.style.cssText = "border:1px solid #2c313a;border-radius:6px;padding:8px;margin-bottom:8px";
     const headCls = r.ok && s.json_ok ? "ok" : "bad";
@@ -422,9 +461,11 @@ async function runBatch() {
     det.addEventListener("toggle", () => { if (det.open && !det.dataset.done) { det.dataset.done = 1; renderRunResult(det.querySelector(".inner"), r, false); } });
     card.removeChild(detailBox);
     box.appendChild(card);
+    }
+  } finally {
+    $("batch-progress").textContent = `完成 ${batchResults.length} 条`;
+    $("btn-batch").disabled = false;
   }
-  $("batch-progress").textContent = `完成 ${cases.length} 条`;
-  $("btn-batch").disabled = false;
 }
 function exportResults() {
   if (!batchResults.length) { toast("先运行批跑"); return; }

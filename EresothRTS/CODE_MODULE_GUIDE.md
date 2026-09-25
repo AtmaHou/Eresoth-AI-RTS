@@ -35,7 +35,7 @@ Main.unity
              DebugCommandRunner.cs   LLM/兜底共用的请求 DTO（CommandRequest/OrderDto/ConditionDto）+ DTO→Order 映射校验（Map）
              PromptBuilder.cs        系统/用户 Prompt 拼装；内容外置在 EresothRTS/prompts/*.txt（热重载，可独立调试），缺失时回退内嵌默认
              StateDigestBuilder.cs   态势摘要 JSON（军团/资源/战况，喂给 LLM）
-             LlmLogger.cs            llm_log.jsonl v2 落盘：system/user 完整 prompt、content/reasoning、usage、错误现场
+             LlmLogger.cs            llm_log.jsonl v2 + llm_io.log 落盘：system/user 完整 prompt、content/reasoning、usage、错误现场
              SemanticMap.cs          语义点注册表："东矿/家门口"等别名 → 世界坐标（TryGet）
              SemanticMapRegistrar.cs 开局注册本局语义点
              Order.cs                军令模型：OrderAction 白名单 + Order 五槽位 + OrderCondition 触发器
@@ -118,4 +118,4 @@ RTSConfig 资产（Inspector 可调）→ RuntimeConfig.Initialize() → 静态�
 - 全局列表由 `Game` 持有，实体销毁时各自 `OnDestroy()` 移除自己。
 - 所有实体贴地走 `Game.TerrainHeight(x, z)`，新增生成逻辑不要假设 y=0。
 - `Game.Toast()` 仅玩家阵营侧可调用。
-- 对局日志在 `EresothRTS/command_log.jsonl`（玩家原话/态势 digest/模型输出/参谋回复/执行结果），是评测与蒸馏数据源，改动指挥链路时保持字段稳定；发给 LLM 的完整 prompt 与返回在 `llm_log.jsonl`（v2：system/user/content/reasoning/usage），两者按时间戳关联，查看用 `tools/prompt_lab.py`。
+- 对局日志在 `EresothRTS/command_log.jsonl`（玩家原话/态势 digest/模型输出/参谋回复/执行结果），是评测与蒸馏数据源，改动指挥链路时保持字段稳定；发给 LLM 的完整 prompt 与返回在 `llm_log.jsonl`（v2：system/user/content/reasoning/usage）及人类可读副本 `llm_io.log`，两者按时间戳关联，查看用 `tools/prompt_lab.py` 或直接打开 `llm_io.log`。

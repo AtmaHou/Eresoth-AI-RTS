@@ -1,12 +1,13 @@
 # 厄瑞索斯 RTS（Eresoth RTS）
 
 对应《RTS对战游戏项目启动设计文档》M1 垂直切片 + D1 文字指挥 Demo：**纯代码生成，零美术资源，开箱即玩**。
-当前版本 **v2.4.0**，详见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本 **v2.4.2**，详见 [CHANGELOG.md](CHANGELOG.md)。
 
 > **v2.4 新特性：Prompt 独立调试 + Prompt Lab 工具。**
 > 发给模型的 Prompt 外置在 `EresothRTS/prompts/*.txt` 三个文本文件里——改文件即热重载，不用改代码不用重启游戏。
-> 双日志重构：`llm_log.jsonl` v2 直接可见完整的 system/user prompt、模型正文与思考过程、token 用量；`command_log.jsonl` 只留指令-执行链路。
+> 双日志重构：`llm_log.jsonl` v2 直接可见完整的 system/user prompt、模型正文与思考过程、token 用量；`llm_io.log` 是同内容的人类可读版（编辑器直接打开）；`command_log.jsonl` 只留指令-执行链路。
 > 新增本地调试页 **`AI_RTS/tools/prompt_lab.py`**（`python tools/prompt_lab.py` 启动，零依赖）：日志查看、Prompt 编辑试跑、批跑 16 条预置样例并导出结果。
+> 有兵即可直接下令：第一条军事命令自动编组（一军团/二军团），不再要求先按 F10。
 
 > **v2.1 新特性：战争迷雾（可开关）。** 魔兽式双重迷雾：未探索全黑、已探索半暗、可见清晰；
 > 看不见的敌人整体隐藏，参谋与条件军令也只感知看得见的敌人——先侦察再调度，指挥体验更接近真实战场。

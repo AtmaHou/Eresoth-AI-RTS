@@ -43,7 +43,7 @@ namespace Eresoth
         /// <summary>运行时配置的本机保存路径（persistentDataPath，仓库目录之外），菜单界面直接展示。</summary>
         public static string LocalConfigPath => Path.Combine(Application.persistentDataPath, "llm_config.json");
 
-        const float TimeoutSeconds = 30f;
+        const float TimeoutSeconds = 60f;   // 普通模型 60s：网络波动下 30s 容易误超时（kimi-k2.6 实测常 8~20s，峰值更高）
 
         static string LocalCfgPath => LocalConfigPath;
         static string ProjectCfgPath => Path.Combine(Application.dataPath, "../llm_config.json");
@@ -117,10 +117,10 @@ namespace Eresoth
             string system = PromptBuilder.SystemPrompt();
             string user = PromptBuilder.UserPrompt(playerText, digestJson, historyText);
             LastSystemPrompt = system; LastUserPrompt = user;
-            StartCoroutine(Request(system, user, onJson, onError));
+            StartCoroutine(Request(system, user, playerText, onJson, onError));
         }
 
-        IEnumerator Request(string system, string user, Action<string> onJson, Action<string, string> onError)
+        IEnumerator Request(string system, string user, string label, Action<string> onJson, Action<string, string> onError)
         {
             // 参数兼容：Kimi 全系只能 temperature=1 且不支持 response_format；思考模型同理，超时放宽
             bool thinking = cfg.thinking || IsThinkingModel(cfg.model);
@@ -148,7 +148,7 @@ namespace Eresoth
             if (req.result != UnityWebRequest.Result.Success)
             {
                 string errMsg = $"API 请求失败：{req.error}{FmtServerError(respText)}";
-                LlmLogger.Log("parse", cfg.model, url, promptSrc, system, user, req.responseCode, elapsed,
+                LlmLogger.Log("parse", cfg.model, url, promptSrc, label, system, user, req.responseCode, elapsed,
                     null, null, (0, 0, 0), errMsg, respText);
                 onError?.Invoke(errMsg, Truncate(respText));
                 yield break;
@@ -163,12 +163,12 @@ namespace Eresoth
             if (content == null || string.IsNullOrWhiteSpace(content))
             {
                 string errMsg = "API 返回格式异常（思考模型可能因 max_tokens 截断导致 content 为空）";
-                LlmLogger.Log("parse", cfg.model, url, promptSrc, system, user, req.responseCode, elapsed,
+                LlmLogger.Log("parse", cfg.model, url, promptSrc, label, system, user, req.responseCode, elapsed,
                     content, reasoning, usage, errMsg, respText);
                 onError?.Invoke(errMsg, Truncate(respText));
                 yield break;
             }
-            LlmLogger.Log("parse", cfg.model, url, promptSrc, system, user, req.responseCode, elapsed,
+            LlmLogger.Log("parse", cfg.model, url, promptSrc, label, system, user, req.responseCode, elapsed,
                 content, reasoning, usage, null, null);
             onJson?.Invoke(content);
         }
@@ -276,7 +276,7 @@ namespace Eresoth
                 if (req.result != UnityWebRequest.Result.Success)
                 {
                     string errMsg = $"连接失败（{ms}ms）：{req.error}{FmtServerError(respText)}";
-                    LlmLogger.Log("test", model, url, null, null, ping, req.responseCode, ms,
+                    LlmLogger.Log("test", model, url, null, null, null, ping, req.responseCode, ms,
                         null, null, (0, 0, 0), errMsg, respText);
                     onDone?.Invoke(false, errMsg);
                     yield break;
@@ -286,7 +286,7 @@ namespace Eresoth
                 string reasoning = FirstChoice(parsed)?.message?.reasoning_content;
                 if (content != null && !string.IsNullOrWhiteSpace(content))
                 {
-                    LlmLogger.Log("test", model, url, null, null, ping, req.responseCode, ms,
+                    LlmLogger.Log("test", model, url, null, null, null, ping, req.responseCode, ms,
                         content, reasoning, ExtractUsage(parsed), null, null);
                     onDone?.Invoke(true, $"连通正常 · {model} · {ms}ms");
                     yield break;
@@ -297,7 +297,7 @@ namespace Eresoth
                     continue;
                 }
                 string err = $"已连通但返回异常（{ms}ms）{FmtServerError(respText)}";
-                LlmLogger.Log("test", model, url, null, null, ping, req.responseCode, ms,
+                LlmLogger.Log("test", model, url, null, null, null, ping, req.responseCode, ms,
                     content, reasoning, ExtractUsage(parsed), err, respText);
                 onDone?.Invoke(false, err);
                 yield break;

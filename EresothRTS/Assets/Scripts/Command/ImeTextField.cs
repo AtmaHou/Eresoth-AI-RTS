@@ -14,14 +14,22 @@ namespace Eresoth
     {
         static string prevComp = "";   // 上一帧 IME 合成串（跨控件隔离）
         static string lastCtrl = "";
+        static int lastDrawnId = -1;   // Draw（OnGUI 内）算出的控件 ID，供 Update 等非 OnGUI 上下文查焦点
+        static string lastDrawnName = "";
 
         static int IdOf(string ctrlName) => GUIUtility.GetControlID(ctrlName.GetHashCode(), FocusType.Keyboard);
 
-        /// <summary>控件是否持有键盘焦点。</summary>
-        public static bool IsFocused(string ctrlName) => GUIUtility.keyboardControl == IdOf(ctrlName);
+        /// <summary>控件是否持有键盘焦点。Update 等非 OnGUI 上下文禁止调 GetControlID（会抛 ArgumentException），
+        /// 这里用 Draw 时缓存的 ID 比较（keyboardControl 本身任意时刻可读）。</summary>
+        public static bool IsFocused(string ctrlName)
+            => lastDrawnName == ctrlName && lastDrawnId >= 0 && GUIUtility.keyboardControl == lastDrawnId;
 
         /// <summary>聚焦指定控件（FocusControl 对未注册的自定义控件名无效，用本方法代替）。</summary>
-        public static void Focus(string ctrlName) => GUIUtility.keyboardControl = IdOf(ctrlName);
+        public static void Focus(string ctrlName)
+        {
+            if (lastDrawnName == ctrlName && lastDrawnId >= 0) GUIUtility.keyboardControl = lastDrawnId;
+            else if (Event.current != null) GUIUtility.keyboardControl = IdOf(ctrlName);
+        }
 
         /// <summary>绘制输入框并处理输入，text 为已确认文本，返回新的已确认文本。
         /// placeholder：空且未聚焦时的灰色提示语；聚焦时显示闪烁光标（合成串期间常亮）。</summary>
@@ -29,6 +37,7 @@ namespace Eresoth
         {
             var e = Event.current;
             int id = IdOf(ctrlName);
+            lastDrawnId = id; lastDrawnName = ctrlName;   // 供 IsFocused 在非 OnGUI 上下文使用
             bool focused = GUIUtility.keyboardControl == id;
             if (e.type == EventType.MouseDown)
             {

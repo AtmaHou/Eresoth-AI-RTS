@@ -96,6 +96,9 @@ namespace Eresoth
             Add("你", text);
             waiting = true;
 
+            // 有兵没编组时先自动编组：保证 digest 的 forces_list 非空，"全军进攻/一军团…"才能解析
+            ForceManager.I?.EnsureForces(Game.I.playerTeam);
+
             // 指令缓存优先：标记过"成功"的同文指令直接回放缓存的格式化结果，跳过 LLM
             string cachedJson = CommandCache.Lookup(text);
             if (cachedJson != null)

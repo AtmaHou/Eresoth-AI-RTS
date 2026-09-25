@@ -128,21 +128,53 @@ namespace Eresoth
         }
 
         /// <summary>自动编组：把该阵营所有未编组的战斗单位编入军团。
-        /// MVP 策略：交替分到两个军团（一军团/二军团），便于演示分兵命令。</summary>
+        /// MVP 策略：交替分到两个军团（一军团/二军团），便于演示分兵命令。
+        /// "没有可编组"时区分两种情况：已有军团（只是都编过组了）→ 报告现状；真的一个战斗单位都没有 → 提示先训练。</summary>
         public void AutoForm(Team team)
         {
             var mine = new List<Unit>();
             foreach (var u in Game.I.units)
                 if (u != null && u.Alive && u.team == team && !u.def.worker && string.IsNullOrEmpty(u.forceId))
                     mine.Add(u);
-            if (mine.Count == 0) { if (team == Game.I.playerTeam) Game.I.Toast("没有可编组的战斗单位"); return; }
+            if (mine.Count == 0)
+            {
+                if (team != Game.I.playerTeam) return;
+                var olds = OfTeam(team).FindAll(f => f.AliveCount > 0);
+                if (olds.Count > 0)
+                {
+                    var sb = new System.Text.StringBuilder("已在编组：");
+                    for (int i = 0; i < olds.Count; i++)
+                    {
+                        if (i > 0) sb.Append(" / ");
+                        sb.Append($"{olds[i].name} {olds[i].AliveCount} 人");
+                    }
+                    sb.Append("（新训练的兵会自动入编）");
+                    Game.I.Toast(sb.ToString());
+                }
+                else Game.I.Toast("没有可编组的战斗单位（先训练士兵）");
+                return;
+            }
 
-            var olds = OfTeam(team);
-            var f1 = olds.Count > 0 ? olds[0] : CreateForce(team, "一军团");
-            var f2 = olds.Count > 1 ? olds[1] : CreateForce(team, "二军团");
+            var olds0 = OfTeam(team);
+            var f1 = olds0.Count > 0 ? olds0[0] : CreateForce(team, "一军团");
+            var f2 = olds0.Count > 1 ? olds0[1] : CreateForce(team, "二军团");
             for (int i = 0; i < mine.Count; i++) Assign(mine[i], i % 2 == 0 ? f1 : f2);
             if (team == Game.I.playerTeam)
                 Game.I.Toast($"编组完成：{f1.name} {f1.AliveCount} 人 / {f2.name} {f2.AliveCount} 人");
+        }
+
+        /// <summary>有战斗单位但还没编组时自动编组（首次发令前的兜底，保证 digest 的 forces_list 不为空）。
+        /// 返回是否新编了组。军团已存在则不动作。</summary>
+        public bool EnsureForces(Team team)
+        {
+            if (OfTeam(team).Count > 0) return false;
+            foreach (var u in Game.I.units)
+                if (u != null && u.Alive && u.team == team && !u.def.worker)
+                {
+                    AutoForm(team);
+                    return true;
+                }
+            return false;
         }
 
         /// <summary>Unit.Spawn 挂钩：新训练的战斗单位自动编入该阵营第一个军团（工人跳过）。</summary>

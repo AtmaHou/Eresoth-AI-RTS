@@ -46,3 +46,15 @@
 - `EresothRTS/llm_config.json`（gitignored）由 Prompt Lab 的"模型设置"读写，游戏与调试共用一份配置。
 - 批跑会真实消耗 API token（kimi-k2.6 推理模型单条约 3K token、12~18s）。
 - 内嵌默认 prompt 与 prompts/*.txt 需保持一致：日常调 prompt 只改文件；确认更优后可把文件内容同步回 `PromptBuilder.cs` 的内嵌串，用 `python tools/check_prompt_sync.py` 校验两者一致。
+
+## 5. 跟进修复（v2.4.1，同日实玩反馈）
+
+- **首条军事命令要求先按 F10**：根因是标准开局不自动编组，digest 的 forces_list 为空；且侦察触发的自动编队先于玩家按 F10，导致 F10 又误报"没有可编组的战斗单位"。修复：`CommandConsole.Send` 发令前 `ForceManager.EnsureForces`（有兵无军团即自动编组）；`OrderDispatcher` 对空 force_id/侦察令自动编队后退取非空军团；`AutoForm` 已编组时改报"已在编组：一军团 X 人 / 二军团 Y 人"。
+- **回车崩溃 `GUI functions only from OnGUI`**：`ImeTextField.IsFocused` 在非 OnGUI 上下文调 `GetControlID`。修复：Draw 时缓存控件 ID，IsFocused 比缓存（keyboardControl 任意时刻可读）。
+- **"log 里没有简明的 input/output"**：新增人类可读副本 `EresothRTS/llm_io.log`——每次解析调用一段"指令 + INPUT(system/user 全文) + OUTPUT(content/reasoning/错误)"，编辑器直接打开。
+- **解析频繁超时降级**：超时 30s→60s（思考模型 60s→90s）。
+- "造2个弓箭手实际造 6 个"确认是累计（此前缓存命中的"造4个弓箭手"刚完成），count 无 bug。
+
+## 6. 跟进修复（v2.4.2）
+
+- **Prompt Lab"卡死无结果"**：服务端正常（单跑约 15s），问题在前端——请求异常时 JS 抛错无反馈，批跑一条失败则整条中断、按钮永久禁用。修复：统一异常处理并显示可读错误；单跑等待计时；批跑单条失败记 ✗ 继续；进度提示预期耗时。注意：页面必须由 `python tools/prompt_lab.py` 启动（它同时起本地服务器），直接双击 html 文件页面无法工作。
